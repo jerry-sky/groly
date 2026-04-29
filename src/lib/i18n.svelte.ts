@@ -75,6 +75,15 @@ class TranslationProxy {
 	get sort_mode_subtitle() { void _lang; return m.sort_mode_subtitle(); }
 	get sort_mode_done() { void _lang; return m.sort_mode_done(); }
 	get items_add() { void _lang; return m.items_add(); }
+	get list_mode_normal() { void _lang; return m.list_mode_normal(); }
+	get list_mode_edit() { void _lang; return m.list_mode_edit(); }
+	get list_interaction_mode_group_label() { void _lang; return m.list_interaction_mode_group_label(); }
+	get item_toggle_checked_aria() { void _lang; return m.item_toggle_checked_aria(); }
+	get list_search_action() { void _lang; return m.list_search_action(); }
+	get list_search_placeholder() { void _lang; return m.list_search_placeholder(); }
+	get list_search_close_aria() { void _lang; return m.list_search_close_aria(); }
+	get list_search_no_results() { void _lang; return m.list_search_no_results(); }
+	get hint_dismiss_aria() { void _lang; return m.hint_dismiss_aria(); }
 	// item
 	get item_name_label() { void _lang; return m.item_name_label(); }
 	get item_quantity_label() { void _lang; return m.item_quantity_label(); }
@@ -426,6 +435,11 @@ export function list_items_open(count: number): string {
 	void _lang;
 	if (_lang === 'en') return `${count} ${count === 1 ? 'item' : 'items'}`;
 	return `${count} ${count === 1 ? 'Artikel' : 'Artikel'}`;
+}
+export function list_search_results_subtitle(count: number): string {
+	void _lang;
+	if (_lang === 'en') return `${count} ${count === 1 ? 'result' : 'results'}`;
+	return `${count} Ergebnis${count !== 1 ? 'se' : ''}`;
 }
 export function items_checked_count(count: number): string {
 	void _lang;

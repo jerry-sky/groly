@@ -7,6 +7,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { emitToListMembers } from '$lib/server/userEvents';
 import { schedulePushForItemAdded } from '$lib/server/pushDebounce';
 import { now, generateId } from '$lib/auth';
+import { CATEGORIES } from '$lib/categories';
 
 function getListAccess(listId: string, userId: string): { list: typeof lists.$inferSelect; permission: 'owner' | 'write' | 'read' | null } {
 	const list = db.select().from(lists).where(eq(lists.id, listId)).get();
@@ -54,31 +55,37 @@ export const POST: RequestHandler = async (event) => {
 	if (!list || permission === null) return json({ error: 'Nicht gefunden' }, { status: 404 });
 	if (permission === 'read') return json({ error: 'Keine Schreibberechtigung' }, { status: 403 });
 
-	const { name, quantityInfo, id: clientId } = await event.request.json();
-	if (!name?.trim()) return json({ error: 'Name erforderlich' }, { status: 400 });
+	const body = await event.request.json();
+	const { name, quantityInfo, id: clientId, categoryOverride: bodyCat } = body;
+	const trimmedName = typeof name === 'string' ? name.trim() : '';
+	const rawCat =
+		typeof bodyCat === 'string' && bodyCat.length > 0 && CATEGORIES.some((c) => c.key === bodyCat)
+			? bodyCat
+			: null;
+	const trimmedQty = typeof quantityInfo === 'string' && quantityInfo.trim() ? quantityInfo.trim() : null;
 
 	const id = typeof clientId === 'string' && clientId.length > 0 && clientId.length <= 32
 		? clientId
 		: generateId(16);
 	const ts = now();
-	const trimmedName = name.trim();
-	const trimmedQty = quantityInfo?.trim() ?? null;
-	db.insert(items).values({ id, listId: event.params.id, name: trimmedName, quantityInfo: trimmedQty, isChecked: false, createdBy: user!.id, createdAt: ts, updatedAt: ts }).run();
+	db.insert(items).values({ id, listId: event.params.id, name: trimmedName, quantityInfo: trimmedQty, isChecked: false, categoryOverride: rawCat, createdBy: user!.id, createdAt: ts, updatedAt: ts }).run();
 
-	// Item-History für Vorschläge aktualisieren
-	db.insert(itemHistory)
-		.values({ userId: user!.id, name: trimmedName, useCount: 1, lastUsedAt: ts })
-		.onConflictDoUpdate({
-			target: [itemHistory.userId, itemHistory.name],
-			set: { useCount: sql`${itemHistory.useCount} + 1`, lastUsedAt: ts }
-		})
-		.run();
+	if (trimmedName.length > 0) {
+		// Item-History für Vorschläge aktualisieren
+		db.insert(itemHistory)
+			.values({ userId: user!.id, name: trimmedName, useCount: 1, lastUsedAt: ts })
+			.onConflictDoUpdate({
+				target: [itemHistory.userId, itemHistory.name],
+				set: { useCount: sql`${itemHistory.useCount} + 1`, lastUsedAt: ts }
+			})
+			.run();
+	}
 
 	// Liste updatedAt aktualisieren
 	db.update(lists).set({ updatedAt: ts }).where(eq(lists.id, event.params.id)).run();
 
 	const creator = db.select({ username: users.username }).from(users).where(eq(users.id, user!.id)).get();
-	const newItem = { id, listId: event.params.id, name: trimmedName, quantityInfo: trimmedQty, isChecked: false, checkedAt: null, categoryOverride: null, createdBy: user!.id, createdByUsername: creator?.username ?? null, createdAt: ts, updatedAt: ts };
+	const newItem = { id, listId: event.params.id, name: trimmedName, quantityInfo: trimmedQty, isChecked: false, checkedAt: null, categoryOverride: rawCat, createdBy: user!.id, createdByUsername: creator?.username ?? null, createdAt: ts, updatedAt: ts };
 
 	emitToListMembers(event.params.id, { type: 'item_added', listId: event.params.id, item: newItem, byUserId: user!.id });
 

@@ -8,16 +8,19 @@
 	import BottomNav from '$lib/components/BottomNav.svelte';
 	import ItemTile from '$lib/components/ItemTile.svelte';
 	import ItemRow from '$lib/components/ItemRow.svelte';
+	import ListInteractionModeBar from '$lib/components/ListInteractionModeBar.svelte';
+	import type { ListInteractionMode } from '$lib/listInteractionMode';
 	import CheckedDrawer from '$lib/components/CheckedDrawer.svelte';
 	import AddItemModal from '$lib/components/AddItemModal.svelte';
 	import AddItemBar from '$lib/components/AddItemBar.svelte';
 	import { execute, generateClientId, cacheItemsData, getOfflineItems, getOfflineListName, updateOfflineItem, deleteOfflineItem } from '$lib/sync/manager';
-	import { t, list_items_open } from '$lib/i18n.svelte';
+	import { t, list_items_open, list_search_results_subtitle } from '$lib/i18n.svelte';
 	import { getCategoryKey } from '$lib/categories';
 	import { userSettings } from '$lib/userSettings.svelte';
 
 	const LISTVIEW_HINT_KEY = 'groly_listview_hint_dismissed';
 	const LOCATION_HINT_KEY = 'groly_location_hint_dismissed';
+	const LIST_INTERACTION_MODE_KEY = 'groly_list_interaction_mode';
 	let showListViewHint = $state(false);
 	let showLocationHint = $state(false);
 
@@ -45,8 +48,17 @@
 	let autoScannerOnOpen = $state(false);
 	let autoFavoritesOnOpen = $state(false);
 	let itemsLoadVersion = 0;
+	let listInteractionMode = $state<ListInteractionMode>('normal');
 
 	const listId = $derived($page.params.id);
+	const showListModeBar = $derived(userPermission !== 'read');
+	const effectiveListInteractionMode = $derived(
+		userPermission === 'read' ? 'normal' : listInteractionMode
+	);
+	const topBaseRem = '5.25rem';
+	const hintTopBaseRem = '5.5rem';
+	const modeBarRem = '2.875rem';
+	const panelRem = '3.5rem';
 	const openItems = $derived.by(() => {
 		const unchecked = items.filter(i => !i.isChecked);
 		const listSettings = listId ? userSettings.getListCategorySettings(listId) : null;
@@ -82,10 +94,24 @@
 	const gridPrefix = $derived(displayItems.length % 3 === 0 ? 0 : 3 - (displayItems.length % 3));
 	const totalSearchResults = $derived(displayItems.length + (searchQuery.trim() ? displayCheckedItems.length : 0));
 	const headerSubtitle = $derived(
-		searchQuery.trim()
-			? `${totalSearchResults} Ergebnis${totalSearchResults !== 1 ? 'se' : ''}`
-			: list_items_open(openCount)
+		searchQuery.trim() ? list_search_results_subtitle(totalSearchResults) : list_items_open(openCount)
 	);
+	const modeBarOffset = $derived(showListModeBar ? ` + ${modeBarRem}` : '');
+	const searchPanelOffset = $derived(searchOpen ? ` + ${panelRem}` : '');
+	const listHintPanelOffset = $derived(showListViewHint ? ` + ${panelRem}` : '');
+	const locationHintPanelOffset = $derived(showLocationHint ? ` + ${panelRem}` : '');
+	const searchTop = $derived(`calc(env(safe-area-inset-top) + ${topBaseRem}${modeBarOffset})`);
+	const listHintTop = $derived(`calc(env(safe-area-inset-top) + ${hintTopBaseRem}${modeBarOffset})`);
+	const locationHintTop = $derived(
+		`calc(env(safe-area-inset-top) + ${hintTopBaseRem}${modeBarOffset}${listHintPanelOffset})`
+	);
+	const contentTop = $derived(
+		`calc(env(safe-area-inset-top) + ${topBaseRem}${modeBarOffset}${searchPanelOffset}${listHintPanelOffset}${locationHintPanelOffset})`
+	);
+
+	function focusInlineEditorById(itemId: string) {
+		document.querySelector<HTMLElement>(`[data-item-editor="${CSS.escape(itemId)}"]`)?.focus();
+	}
 
 	async function loadItems() {
 		const targetListId = listId ?? '';
@@ -139,6 +165,52 @@
 		scrollContainer?.scrollTo({ top: scrollContainer.scrollHeight });
 	}
 
+	function setListInteractionMode(m: ListInteractionMode) {
+		if (m === listInteractionMode) return;
+		const active = document.activeElement;
+		if (active instanceof HTMLElement && active.hasAttribute('data-inline-item-name')) {
+			active.blur();
+		}
+		listInteractionMode = m;
+		localStorage.setItem(LIST_INTERACTION_MODE_KEY, m);
+	}
+
+	async function saveItemInlineName(item: Item, newName: string) {
+		if (userPermission === 'read') return;
+		const trimmed = newName.trim();
+		if (!trimmed || trimmed === item.name) return;
+		const id = item.id;
+		const clientUpdatedAt = item.updatedAt;
+		await execute(
+			() =>
+				fetch(`/api/items/${id}`, {
+					method: 'PUT',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ name: trimmed, clientUpdatedAt })
+				}).then(r => {
+					if (!r.ok) throw new Error();
+				}),
+			{ type: 'update_item', payload: { id, name: trimmed, clientUpdatedAt }, createdAt: Date.now() },
+			() => {
+				const ts = Math.floor(Date.now() / 1000);
+				items = items.map(i => (i.id === id ? { ...i, name: trimmed, updatedAt: ts } : i));
+				void updateOfflineItem(id, { name: trimmed, updatedAt: ts });
+			}
+		);
+	}
+
+	async function navigateItemVertical(fromItem: Item, dir: -1 | 1) {
+		const list = displayItems;
+		const idx = list.findIndex(i => i.id === fromItem.id);
+		if (idx < 0) return;
+		const nextIdx = idx + dir;
+		if (nextIdx < 0 || nextIdx >= list.length) return;
+		const nextId = list[nextIdx].id;
+		(document.activeElement as HTMLElement | null)?.blur();
+		await tick();
+		focusInlineEditorById(nextId);
+	}
+
 	async function toggleItem(item: Item) {
 		if (userPermission === 'read') return;
 		const newChecked = !item.isChecked;
@@ -158,30 +230,108 @@
 		);
 	}
 
-	async function addItem(name: string, quantityInfo: string) {
+	function categoryOverrideForNewRowAfter(afterItem: Item): string | null {
+		const pk = getCategoryKey(afterItem.name, afterItem.categoryOverride);
+		const dk = getCategoryKey('', null);
+		return pk === dk ? null : pk;
+	}
+
+	async function inlineEnterNewBelow(fromItem: Item, typedName: string) {
+		if (userPermission === 'read') return;
+		const trimmed = typedName.trim();
+		if (!trimmed) {
+			await handleInlineExitEmpty(fromItem);
+			return;
+		}
+		if (trimmed !== fromItem.name) {
+			await saveItemInlineName(fromItem, trimmed);
+		}
+		const basis = items.find(i => i.id === fromItem.id) ?? fromItem;
+		const cat = categoryOverrideForNewRowAfter(basis);
+		const newId = await addItem('', '', { afterItemId: basis.id, categoryOverride: cat });
+		await tick();
+		focusInlineEditorById(newId);
+	}
+
+	async function handleInlineExitEmpty(item: Item) {
+		if (userPermission === 'read') return;
+		await deleteItem(item.id);
+	}
+
+	function toggleItemFromView(item: Item) {
+		void toggleItem(item);
+	}
+
+	function openItemEdit(item: Item) {
+		if (userPermission === 'read') return;
+		editItem = item;
+		addModalOpen = true;
+	}
+
+	async function addItem(
+		name: string,
+		quantityInfo: string,
+		opts?: { afterItemId?: string | null; categoryOverride?: string | null }
+	): Promise<string> {
 		const id = generateClientId();
+		const trimmedName = name.trim();
+		const trimmedQty = quantityInfo.trim() || null;
+		const catOverride = opts?.categoryOverride ?? null;
 		const optimisticItem: Item = {
-			id, listId: listId ?? '', name: name.trim(),
-			quantityInfo: quantityInfo.trim() || null,
-			isChecked: false, checkedAt: null, categoryOverride: null,
+			id,
+			listId: listId ?? '',
+			name: trimmedName,
+			quantityInfo: trimmedQty,
+			isChecked: false,
+			checkedAt: null,
+			categoryOverride: catOverride,
 			createdByUsername: data.user?.username ?? null,
 			updatedAt: Math.floor(Date.now() / 1000)
 		};
+		let nextItems: Item[];
+		if (opts?.afterItemId) {
+			const ix = items.findIndex(i => i.id === opts.afterItemId);
+			nextItems =
+				ix < 0
+					? [...items, optimisticItem]
+					: [...items.slice(0, ix + 1), optimisticItem, ...items.slice(ix + 1)];
+		} else {
+			nextItems = [...items, optimisticItem];
+		}
 		await execute(
-			() => fetch(`/api/lists/${listId}/items`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ id, name, quantityInfo })
-			}).then(r => { if (!r.ok) throw new Error(); }),
-			{ type: 'create_item', payload: { id, listId: listId ?? '', name, quantityInfo }, createdAt: Date.now() },
+			() =>
+				fetch(`/api/lists/${listId}/items`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						id,
+						name: trimmedName,
+						quantityInfo,
+						categoryOverride: catOverride
+					})
+				}).then(r => {
+					if (!r.ok) throw new Error();
+				}),
+			{
+				type: 'create_item',
+				payload: {
+					id,
+					listId: listId ?? '',
+					name: trimmedName,
+					quantityInfo,
+					categoryOverride: catOverride
+				},
+				createdAt: Date.now()
+			},
 			() => {
-				items = [...items, optimisticItem];
+				items = nextItems;
 				void cacheItemsData(items);
-				if (!suggestions.includes(name)) {
-					suggestions = [name, ...suggestions].slice(0, 30);
+				if (trimmedName && !suggestions.includes(trimmedName)) {
+					suggestions = [trimmedName, ...suggestions].slice(0, 30);
 				}
 			}
 		);
+		return id;
 	}
 
 	async function saveEditItem(name: string, quantityInfo: string, categoryOverride: string | null) {
@@ -297,6 +447,11 @@
 			showLocationHint = true;
 		}
 
+		const storedMode = localStorage.getItem(LIST_INTERACTION_MODE_KEY);
+		if (storedMode === 'editing' || storedMode === 'normal') {
+			listInteractionMode = storedMode;
+		}
+
 		if (window.visualViewport) {
 			const onViewportResize = () => {
 				keyboardOpen = (window.innerHeight - window.visualViewport!.height) > 100;
@@ -367,10 +522,20 @@
 		onSearch={showSearch && !searchOpen ? () => searchOpen = true : null}
 	/>
 
+	<!-- Normal / Bearbeiten — fixiert unter dem Header -->
+	{#if showListModeBar}
+		<div
+			class="fixed left-0 right-0 z-30 max-w-[430px] mx-auto px-4 py-1.5"
+			style="top: calc(env(safe-area-inset-top) + 5.25rem); background-color: var(--color-bg)"
+		>
+			<ListInteractionModeBar mode={listInteractionMode} onChange={setListInteractionMode} />
+		</div>
+	{/if}
+
 	<!-- Suchleiste (fixiert unter dem Header, nur wenn aktiv) -->
 	{#if searchOpen}
 		<div class="fixed left-0 right-0 z-30 max-w-[430px] mx-auto px-4 py-2"
-		     style="top: calc(env(safe-area-inset-top) + 5.25rem); background-color: var(--color-bg)">
+		     style="top: {searchTop}; background-color: var(--color-bg)">
 			<div class="flex items-center gap-2 rounded-xl px-3 py-2.5"
 			     style="background-color: var(--color-surface-low)">
 				<svg width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -382,7 +547,7 @@
 				<input
 					autofocus
 					type="text"
-					placeholder="Suchen..."
+					placeholder={t.list_search_placeholder}
 					bind:value={searchQuery}
 					onkeydown={(e) => e.key === 'Escape' && closeSearch()}
 					class="flex-1 bg-transparent outline-none text-sm"
@@ -392,7 +557,7 @@
 					onclick={closeSearch}
 					class="w-6 h-6 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
 					style="background-color: var(--color-surface-high); color: var(--color-on-surface-variant)"
-					aria-label="Suche schließen"
+					aria-label={t.list_search_close_aria}
 				>×</button>
 			</div>
 		</div>
@@ -401,7 +566,7 @@
 	<!-- Hinweis-Banner für kleine Bildschirme -->
 	{#if showListViewHint}
 		<div class="fixed left-0 right-0 z-20 max-w-[430px] mx-auto px-4 pointer-events-none"
-		     style="top: calc(env(safe-area-inset-top) + 5.5rem)">
+		     style="top: {listHintTop}">
 			<div class="flex items-center gap-3 px-3.5 py-2.5 rounded-2xl pointer-events-auto"
 			     style="background-color: var(--color-surface-elevated); border: 1px solid var(--color-outline-variant)">
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)"
@@ -420,7 +585,7 @@
 					onclick={() => dismissListViewHint(false)}
 					class="w-6 h-6 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
 					style="background-color: var(--color-surface-high); color: var(--color-on-surface-variant)"
-					aria-label="Hinweis schließen"
+					aria-label={t.hint_dismiss_aria}
 				>×</button>
 			</div>
 		</div>
@@ -429,7 +594,7 @@
 	<!-- Location-Hint-Banner -->
 	{#if showLocationHint}
 		<div class="fixed left-0 right-0 z-20 max-w-[430px] mx-auto px-4 pointer-events-none"
-		     style="top: calc(env(safe-area-inset-top) + 5.5rem + {showListViewHint ? '3.5rem' : '0px'})">
+		     style="top: {locationHintTop}">
 			<div class="flex items-center gap-3 px-3.5 py-2.5 rounded-2xl pointer-events-auto"
 			     style="background-color: var(--color-surface-elevated); border: 1px solid var(--color-outline-variant)">
 				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)"
@@ -448,7 +613,7 @@
 					onclick={() => dismissLocationHint(false)}
 					class="w-6 h-6 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
 					style="background-color: var(--color-surface-high); color: var(--color-on-surface-variant)"
-					aria-label="Hinweis schließen"
+					aria-label={t.hint_dismiss_aria}
 				>×</button>
 			</div>
 		</div>
@@ -456,7 +621,7 @@
 
 	<!-- Bottom-Anchored Content -->
 	<div bind:this={scrollContainer} class="flex-1 overflow-y-auto px-4 min-h-0"
-	     style="padding-top: calc(env(safe-area-inset-top) + 5.25rem + {searchOpen ? '3.5rem' : '0px'} + {showListViewHint ? '3.5rem' : '0px'} + {showLocationHint ? '3.5rem' : '0px'}); padding-bottom: 5rem">
+	     style="padding-top: {contentTop}; padding-bottom: 5rem">
 		<div class="min-h-full flex flex-col" class:justify-end={!searchQuery.trim() || !keyboardOpen}>
 		{#if loading}
 			<div class="flex justify-center py-8">
@@ -475,7 +640,7 @@
 				</div>
 			{:else if displayItems.length === 0 && searchQuery.trim()}
 				<div class="text-center py-12">
-					<p class="text-sm" style="color: var(--color-on-surface-variant)">Keine Ergebnisse</p>
+					<p class="text-sm" style="color: var(--color-on-surface-variant)">{t.list_search_no_results}</p>
 				</div>
 			{:else if displayItems.length > 0}
 
@@ -486,8 +651,14 @@
 							<div class="rounded-2xl overflow-hidden">
 								<ItemRow
 									{item}
-									onTap={() => toggleItem(item)}
-									onLongPress={userPermission !== 'read' ? () => { editItem = item; addModalOpen = true; } : () => {}}
+									interactionMode={effectiveListInteractionMode}
+									onTap={() => toggleItemFromView(item)}
+									onToggleCheck={() => toggleItemFromView(item)}
+									onCommitName={(name) => void saveItemInlineName(item, name)}
+									onVerticalNavigate={(d) => void navigateItemVertical(item, d)}
+									onEnterNewBelow={(nextName) => void inlineEnterNewBelow(item, nextName)}
+									onExitEmpty={() => void handleInlineExitEmpty(item)}
+									onLongPress={() => openItemEdit(item)}
 									createdByUsername={item.createdByUsername}
 									currentUsername={data.user?.username ?? null}
 									isFavorite={favoriteNames.has(item.name.toLowerCase())}
@@ -506,8 +677,14 @@
 					{#each displayItems as item (item.id)}
 						<ItemTile
 							{item}
-							onTap={() => toggleItem(item)}
-							onLongPress={userPermission !== 'read' ? () => { editItem = item; addModalOpen = true; } : () => {}}
+							interactionMode={effectiveListInteractionMode}
+							onTap={() => toggleItemFromView(item)}
+							onToggleCheck={() => toggleItemFromView(item)}
+							onCommitName={(name) => void saveItemInlineName(item, name)}
+							onVerticalNavigate={(d) => void navigateItemVertical(item, d)}
+							onEnterNewBelow={(nextName) => void inlineEnterNewBelow(item, nextName)}
+							onExitEmpty={() => void handleInlineExitEmpty(item)}
+							onLongPress={() => openItemEdit(item)}
 							createdByUsername={item.createdByUsername}
 							currentUsername={data.user?.username ?? null}
 							isFavorite={favoriteNames.has(item.name.toLowerCase())}

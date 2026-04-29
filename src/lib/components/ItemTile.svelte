@@ -2,11 +2,33 @@
 	import { getCategoryForItem } from '$lib/categories';
 	import { onMount } from 'svelte';
 	import { userSettings } from '$lib/userSettings.svelte';
+	import { t } from '$lib/i18n.svelte';
+	import InlineItemName from '$lib/components/InlineItemName.svelte';
+	import type { ListInteractionMode } from '$lib/listInteractionMode';
 
-	let { item, onTap, onLongPress, createdByUsername = null, currentUsername = null, isFavorite = false }: {
+	let {
+		item,
+		interactionMode,
+		onTap,
+		onLongPress,
+		onToggleCheck,
+		onCommitName,
+		onVerticalNavigate = null,
+		onEnterNewBelow = null,
+		onExitEmpty = null,
+		createdByUsername = null,
+		currentUsername = null,
+		isFavorite = false,
+	}: {
 		item: { id: string; name: string; quantityInfo: string | null; categoryOverride?: string | null };
+		interactionMode: ListInteractionMode;
 		onTap: () => void;
 		onLongPress: () => void;
+		onToggleCheck: () => void;
+		onCommitName: (name: string) => void;
+		onVerticalNavigate?: ((dir: -1 | 1) => void) | null;
+		onEnterNewBelow?: ((trimmed: string) => void) | null;
+		onExitEmpty?: (() => void) | null;
 		createdByUsername?: string | null;
 		currentUsername?: string | null;
 		isFavorite?: boolean;
@@ -26,16 +48,13 @@
 
 	const category = $derived(getCategoryForItem(item.name, item.categoryOverride));
 
-	// Truncation detection
-	let nameEl: HTMLElement | null = null;
+	let nameEl = $state<HTMLElement | null>(null);
 	let isTruncated = $state(false);
 
-	// Swipe gesture state (touch-based, zuverlässiger auf iOS)
 	let touchStartX = 0;
 	let touchStartY = 0;
 	let swipeConsumed = false;
 
-	// Overlay
 	let showOverlay = $state(false);
 
 	onMount(() => {
@@ -43,110 +62,224 @@
 	});
 
 	$effect(() => {
-		// Re-check if item name changes
 		item.name;
+		interactionMode;
 		checkTruncation();
 	});
 
 	function checkTruncation() {
 		if (nameEl) {
-			isTruncated = nameEl.scrollHeight > nameEl.clientHeight || nameEl.scrollWidth > nameEl.clientWidth;
+			isTruncated =
+				nameEl.scrollHeight > nameEl.clientHeight || nameEl.scrollWidth > nameEl.clientWidth;
 		}
 	}
 
-	// --- Tap / Long-press via Pointer Events ---
-	function startPress(e: PointerEvent) {
-		longFired = false;
-		swipeConsumed = false;
-		pressTimer = setTimeout(() => { longFired = true; onLongPress(); }, 500);
+	function consumeInteractionGuard({ includeSwipe = true }: { includeSwipe?: boolean } = {}): boolean {
+		if (longFired) {
+			longFired = false;
+			return true;
+		}
+		if (includeSwipe && swipeConsumed) {
+			swipeConsumed = false;
+			return true;
+		}
+		return false;
 	}
 
-	function endPress() {
-		if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+	function startLongPress() {
+		longFired = false;
+		swipeConsumed = false;
+		pressTimer = setTimeout(() => {
+			longFired = true;
+			pressTimer = null;
+			onLongPress();
+		}, 500);
+	}
+
+	function stopLongPress() {
+		if (!pressTimer) return;
+		clearTimeout(pressTimer);
+		pressTimer = null;
+	}
+
+	function handleLongPressContextMenu(e: MouseEvent) {
+		e.preventDefault();
+		onLongPress();
 	}
 
 	function handleClick() {
-		if (longFired) { longFired = false; return; }
-		if (swipeConsumed) { swipeConsumed = false; return; }
+		if (consumeInteractionGuard()) return;
 		onTap();
 	}
 
-	// --- Swipe-Erkennung via Touch Events (iOS-zuverlässig) ---
+	function handleDoneClick(e: MouseEvent) {
+		e.stopPropagation();
+		if (consumeInteractionGuard()) return;
+		onToggleCheck();
+	}
+
+	function handleEditSurfaceClick(e: MouseEvent) {
+		if (consumeInteractionGuard({ includeSwipe: false })) return;
+		const target = e.target as HTMLElement;
+		if (target.closest('[data-tile-done-toggle]')) return;
+		if (target.closest('[data-inline-item-name]')) return;
+		nameEl?.focus();
+	}
+
 	function handleTouchStart(e: TouchEvent) {
-		if (!isTruncated) return;
+		if (interactionMode === 'editing' || !isTruncated) return;
 		const t = e.touches[0];
 		touchStartX = t.clientX;
 		touchStartY = t.clientY;
 	}
 
 	function handleTouchMove(e: TouchEvent) {
-		if (swipeConsumed || !isTruncated) return;
+		if (interactionMode === 'editing' || swipeConsumed || !isTruncated) return;
 		const t = e.touches[0];
 		const dx = t.clientX - touchStartX;
 		const dy = t.clientY - touchStartY;
 		if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 18) {
-			if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; }
+			if (pressTimer) {
+				clearTimeout(pressTimer);
+				pressTimer = null;
+			}
 			swipeConsumed = true;
 			showOverlay = true;
 		}
 	}
 </script>
 
-<div class="relative aspect-square" style="direction: ltr">
-	<button
-		onclick={handleClick}
-		onpointerdown={startPress}
-		onpointerup={endPress}
-		onpointerleave={endPress}
-		onpointercancel={endPress}
-		ontouchstart={handleTouchStart}
-		ontouchmove={handleTouchMove}
-		oncontextmenu={(e) => { e.preventDefault(); onLongPress(); }}
-		class="w-full h-full rounded-3xl relative overflow-hidden active:scale-95 transition-transform select-none"
-		style="background-color: var(--color-surface-card); touch-action: pan-y;"
-	>
-		<!-- Favorite dot — top left -->
-		{#if isFavorite && userSettings.showFavoriteIndicator}
-			<span class="absolute top-3 left-3 w-2 h-2 rounded-full z-10"
-			      style="background-color: var(--color-primary)" aria-hidden="true"></span>
-		{/if}
+{#if interactionMode === 'normal'}
+	<!-- Normal: horizontal swipe on truncated names opens overlay with full text (see handleTouchMove / showOverlay). -->
+	<div class="relative aspect-square" style="direction: ltr">
+		<button
+			onclick={handleClick}
+			onpointerdown={startLongPress}
+			onpointerup={stopLongPress}
+			onpointerleave={stopLongPress}
+			onpointercancel={stopLongPress}
+			ontouchstart={handleTouchStart}
+			ontouchmove={handleTouchMove}
+			oncontextmenu={handleLongPressContextMenu}
+			class="w-full h-full rounded-3xl relative overflow-hidden active:scale-95 transition-transform select-none"
+			style="background-color: var(--color-surface-card); touch-action: pan-y;"
+		>
+			{#if isFavorite && userSettings.showFavoriteIndicator}
+				<span class="absolute top-3 left-3 w-2 h-2 rounded-full z-10"
+				      style="background-color: var(--color-primary)" aria-hidden="true"></span>
+			{/if}
 
-		<!-- Creator — top right -->
-		<span class="absolute top-2.5 right-2.5 text-[10px] font-semibold leading-none"
-		      style="color: var(--color-on-surface-variant); visibility: {showCreator ? 'visible' : 'hidden'}">
-			({displayCreator})
-		</span>
-
-		<!-- Icon — obere Hälfte zentriert -->
-		<div class="absolute inset-0 flex items-start justify-center pt-[30px] max-[374px]:pt-[22px]">
-			<svg class="w-11 h-11 max-[374px]:w-9 max-[374px]:h-9" viewBox="0 0 24 24" fill="none"
-			     stroke={category.color} stroke-width="1.3"
-			     stroke-linecap="round" stroke-linejoin="round">
-				{@html category.svgContent}
-			</svg>
-		</div>
-
-		<!-- Name + Menge — feste Höhe, Name immer auf gleicher Y-Position -->
-		<div class="absolute bottom-0 left-0 right-0 px-2.5 pb-2 flex flex-col items-center justify-end h-[3.6rem] max-[374px]:h-[2.6rem]">
-			<span bind:this={nameEl}
-			      class="text-xs font-bold leading-snug line-clamp-2 max-[374px]:line-clamp-1 text-center w-full"
-			      style="color: var(--color-on-surface)">{item.name}</span>
-			<span class="text-[10px] leading-tight text-center mt-0.5 truncate w-full"
-			      style="color: {category.color}; visibility: {item.quantityInfo ? 'visible' : 'hidden'}">
-				{item.quantityInfo || '\u00a0'}
+			<span class="absolute top-2.5 right-2.5 text-[10px] font-semibold leading-none"
+			      style="color: var(--color-on-surface-variant); visibility: {showCreator ? 'visible' : 'hidden'}">
+				({displayCreator})
 			</span>
-		</div>
-	</button>
-</div>
 
-<!-- Full-name overlay – nur wenn Name abgeschnitten und Swipe ausgelöst -->
+			<div class="absolute inset-0 flex items-start justify-center pt-[30px] max-[374px]:pt-[22px]">
+				<svg class="w-11 h-11 max-[374px]:w-9 max-[374px]:h-9" viewBox="0 0 24 24" fill="none"
+				     stroke={category.color} stroke-width="1.3"
+				     stroke-linecap="round" stroke-linejoin="round">
+					{@html category.svgContent}
+				</svg>
+			</div>
+
+			<div class="absolute bottom-0 left-0 right-0 px-2.5 pb-2 flex flex-col items-center justify-end h-[3.6rem] max-[374px]:h-[2.6rem]">
+				<InlineItemName
+					bind:hostEl={nameEl}
+					itemId={item.id}
+					name={item.name}
+					editingEnabled={false}
+					class="text-xs font-bold leading-snug line-clamp-2 max-[374px]:line-clamp-1 text-center w-full"
+					style="color: var(--color-on-surface)"
+					onCommit={onCommitName}
+				/>
+				<span class="text-[10px] leading-tight text-center mt-0.5 truncate w-full"
+				      style="color: {category.color}; visibility: {item.quantityInfo ? 'visible' : 'hidden'}">
+					{item.quantityInfo || '\u00a0'}
+				</span>
+			</div>
+		</button>
+	</div>
+{:else}
+	<!-- Edit: category icon decorative; large tap target focuses name; small Done so checks don’t fire from name taps. -->
+	<!-- Bearbeiten: Kategorie nur Deko; größere Fläche fokussiert den Namen; Done nur kleiner Button -->
+	<div class="relative aspect-square" style="direction: ltr">
+		<div
+			class="w-full h-full rounded-3xl relative overflow-hidden flex flex-col active:scale-95 transition-transform cursor-text"
+			style="background-color: var(--color-surface-card); touch-action: pan-y;"
+			onpointerdown={startLongPress}
+			onpointerup={stopLongPress}
+			onpointerleave={stopLongPress}
+			onpointercancel={stopLongPress}
+			onclick={handleEditSurfaceClick}
+			oncontextmenu={handleLongPressContextMenu}
+		>
+			{#if isFavorite && userSettings.showFavoriteIndicator}
+				<span class="absolute top-3 left-3 w-2 h-2 rounded-full z-10"
+				      style="background-color: var(--color-primary)" aria-hidden="true"></span>
+			{/if}
+
+			<span class="absolute top-2.5 right-2.5 text-[10px] font-semibold leading-none pointer-events-none"
+			      style="color: var(--color-on-surface-variant); visibility: {showCreator ? 'visible' : 'hidden'}">
+				({displayCreator})
+			</span>
+
+			<div class="pointer-events-none absolute inset-0 flex items-start justify-center pt-[30px] max-[374px]:pt-[22px]">
+				<svg class="w-11 h-11 max-[374px]:w-9 max-[374px]:h-9" viewBox="0 0 24 24" fill="none"
+				     stroke={category.color} stroke-width="1.3"
+				     stroke-linecap="round" stroke-linejoin="round">
+					{@html category.svgContent}
+				</svg>
+			</div>
+
+			<div
+				class="mt-auto flex flex-col items-stretch justify-end h-[3.6rem] max-[374px]:h-[2.6rem] px-2.5 pb-2 w-full min-h-0 gap-0.5"
+			>
+				<div class="flex flex-row items-end gap-1 w-full min-h-0 flex-1">
+					<InlineItemName
+						bind:hostEl={nameEl}
+						itemId={item.id}
+						name={item.name}
+						editingEnabled={true}
+						class="text-xs font-bold leading-snug text-left flex-1 min-w-0 outline-none max-h-full overflow-y-auto [&:not(:focus)]:line-clamp-2 max-[374px]:[&:not(:focus)]:line-clamp-1"
+						style="color: var(--color-on-surface)"
+						onCommit={onCommitName}
+						onVerticalNavigate={onVerticalNavigate}
+						onEnterNewBelow={onEnterNewBelow}
+						onExitEmpty={onExitEmpty}
+					/>
+					<button
+						type="button"
+						data-tile-done-toggle
+						class="flex-shrink-0 w-9 h-9 max-[374px]:w-8 max-[374px]:h-8 rounded-xl flex items-center justify-center active:opacity-70 mb-px"
+						style="touch-action: manipulation; background-color: var(--color-surface-high)"
+						aria-label={t.item_toggle_checked_aria}
+						onclick={handleDoneClick}
+					>
+						<svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+						     stroke="var(--color-primary)" stroke-width="2.2"
+						     stroke-linecap="round" stroke-linejoin="round">
+							<polyline points="20 6 9 17 4 12" />
+						</svg>
+					</button>
+				</div>
+				<span class="text-[10px] leading-tight text-center truncate w-full pointer-events-none"
+				      style="color: {category.color}; visibility: {item.quantityInfo ? 'visible' : 'hidden'}">
+					{item.quantityInfo || '\u00a0'}
+				</span>
+			</div>
+		</div>
+	</div>
+{/if}
+
 {#if showOverlay}
 	<div
 		role="button"
 		tabindex="-1"
 		class="fixed inset-0 z-50 flex items-center justify-center"
-		onclick={() => showOverlay = false}
-		onkeydown={(e) => { if (e.key === 'Escape') showOverlay = false; }}
+		onclick={() => (showOverlay = false)}
+		onkeydown={(e) => {
+			if (e.key === 'Escape') showOverlay = false;
+		}}
 	>
 		<div class="absolute inset-0 bg-black/60 backdrop-blur-[2px]"></div>
 		<div class="relative rounded-2xl px-6 py-5 mx-6 text-center shadow-2xl"

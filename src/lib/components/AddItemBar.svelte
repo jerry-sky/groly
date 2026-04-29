@@ -6,7 +6,7 @@
 	import BarcodeScanner from './BarcodeScanner.svelte';
 
 	let { onAdd, onClose, suggestions = [], autoOpenScanner = false, autoOpenFavorites = false, favorites = [], activeItemNames = new Set<string>(), onRemoveFavorite = null, onAddFavorite = null }: {
-		onAdd: (name: string, quantityInfo: string) => Promise<void>;
+		onAdd: (name: string, quantityInfo: string) => Promise<void | string>;
 		onClose: () => void;
 		suggestions?: string[];
 		autoOpenScanner?: boolean;
