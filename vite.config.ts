@@ -1,11 +1,30 @@
+import { paraglideVitePlugin } from '@inlang/paraglide-js';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+function allowedHosts(): string[] {
+    const out = [];
+	if (process.env.ORIGIN) {
+		out.push(process.env.ORIGIN.replace(/https?:\/\//, ''));
+	} else {
+		out.push('localhost');
+	}
+    return out;
+}
+
 export default defineConfig({
+	server: {
+		allowedHosts: allowedHosts(),
+	},
 	plugins: [
 		tailwindcss(),
+		paraglideVitePlugin({
+			project: './project.inlang',
+			outdir: './src/lib/paraglide',
+			isServer: 'import.meta.env.SSR'
+		}),
 		sveltekit(),
 		VitePWA({
 			strategies: 'injectManifest',

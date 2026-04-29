@@ -1,0 +1,18 @@
+# Dev-only image: install deps once; source is bind-mounted at runtime (see docker-compose.dev.yml).
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Native addons (better-sqlite3)
+RUN apk add --no-cache python3 make g++ sqlite-libs
+
+RUN npm install -g pnpm
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install
+
+ENV NODE_ENV=development
+ENV DATABASE_URL=/app/data/groly.db
+ENV HOST=0.0.0.0
+
+EXPOSE 3000
