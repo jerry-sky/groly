@@ -1,4 +1,4 @@
-import type { AvailableLanguageTag } from '$lib/paraglide/runtime';
+import type { Locale } from '$lib/paraglide/runtime';
 import { DEFAULT_CATEGORY_ORDER } from '$lib/categories';
 
 export type ListCategorySettings = {
@@ -17,7 +17,7 @@ export type Shortcut = {
 };
 
 export type UserSettings = {
-	lang?: AvailableLanguageTag;
+	lang?: Locale;
 	theme?: 'system' | 'light' | 'dark';
 	categorySortEnabled?: boolean;
 	categoryOrder?: string[];
@@ -41,7 +41,7 @@ export type UserSettings = {
 };
 
 export const DEFAULT_SETTINGS = {
-	lang: 'de' as AvailableLanguageTag,
+	lang: 'de' as Locale,
 	categorySortEnabled: true,
 	categoryOrder: [...DEFAULT_CATEGORY_ORDER]
 };

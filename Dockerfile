@@ -1,13 +1,18 @@
 FROM node:22-alpine AS builder
 
+
 WORKDIR /app
 RUN apk add --no-cache python3 make g++
+RUN npm i -g pnpm
+
 COPY package*.json ./
-RUN npm ci
+COPY pnpm-lock.yaml ./
+COPY pnpm-workspace.yaml ./
+RUN pnpm i
 
 COPY . .
-RUN npx paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide
-RUN npm run build
+RUN pnpm exec paraglide-js compile --project ./project.inlang --outdir ./src/lib/paraglide
+RUN pnpm run build
 
 # ─── Runtime Stage ───────────────────────────────────────────
 FROM node:22-alpine AS runtime

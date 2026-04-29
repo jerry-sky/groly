@@ -3,7 +3,7 @@ import { type UserSettings, type ListCategorySettings, type Shortcut, DEFAULT_SE
 import { DEFAULT_CATEGORY_ORDER } from '$lib/categories';
 export type { UserSettings, ListCategorySettings, Shortcut } from '$lib/userSettingsTypes';
 export { DEFAULT_SETTINGS } from '$lib/userSettingsTypes';
-import type { AvailableLanguageTag } from '$lib/paraglide/runtime';
+import type { Locale } from '$lib/paraglide/runtime';
 
 const CACHE_KEY = 'groly_settings';
 
@@ -16,7 +16,7 @@ function loadCache(): UserSettings {
 			const legacyLang = localStorage.getItem('groly_lang');
 			const legacyCat = localStorage.getItem('groly_category_settings');
 			const merged: UserSettings = {};
-			if (legacyLang) merged.lang = legacyLang as AvailableLanguageTag;
+			if (legacyLang) merged.lang = legacyLang as Locale;
 			if (legacyCat) {
 				try { Object.assign(merged, JSON.parse(legacyCat)); } catch {}
 			}
@@ -128,7 +128,7 @@ function scheduleSave() {
 
 export const userSettings = {
 	get lang() { return _lang; },
-	set lang(v: AvailableLanguageTag) { _lang = v; scheduleSave(); },
+	set lang(v: Locale) { _lang = v; scheduleSave(); },
 
 	get categorySortEnabled() { return _categorySortEnabled; },
 	set categorySortEnabled(v: boolean) { _categorySortEnabled = v; scheduleSave(); },

@@ -12,6 +12,7 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
 	},
 	"devDependencies": {
+		"@inlang/paraglide-js": "2.16.0",
 		"@inlang/paraglide-sveltekit": "^0.16.1",
 		"@sveltejs/adapter-auto": "^7.0.0",
 		"@sveltejs/adapter-node": "^5.5.4",
@@ -27,7 +28,18 @@
 		"typescript": "^5.9.3",
 		"vite": "^7.3.1",
 		"vite-plugin-pwa": "^1.2.0",
+		"workbox-build": "^7.4.0",
 		"workbox-window": "^7.4.0"
+	},
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"better-sqlite3",
+			"esbuild"
+		],
+		"overrides": {
+			"uuid@<14.0.0": ">=14.0.0",
+			"postcss@<8.5.10": ">=8.5.10"
+		}
 	},
 	"dependencies": {
 		"@undecaf/zbar-wasm": "^0.11.0",

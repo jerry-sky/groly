@@ -1,16 +1,16 @@
 import * as m from '$lib/paraglide/messages';
-import { setLanguageTag, type AvailableLanguageTag } from '$lib/paraglide/runtime';
+import { setLocale, type Locale } from '$lib/paraglide/runtime';
 import { browser } from '$app/environment';
 import { userSettings, initUserSettings } from '$lib/userSettings.svelte';
 
-let _lang = $state<AvailableLanguageTag>('de');
+let _lang = $state<Locale>('de');
 
-export function currentLang(): AvailableLanguageTag {
+export function currentLang(): Locale {
 	return _lang;
 }
 
-export function setLang(lang: AvailableLanguageTag) {
-	setLanguageTag(lang);
+export function setLang(lang: Locale) {
+	void Promise.resolve(setLocale(lang, { reload: false }));
 	_lang = lang;
 	userSettings.lang = lang;
 }
@@ -20,7 +20,7 @@ export async function initLanguage() {
 	// Load from server (falls back to localStorage cache if offline)
 	const serverSettings = await initUserSettings();
 	const lang = userSettings.lang;
-	setLanguageTag(lang);
+	void Promise.resolve(setLocale(lang, { reload: false }));
 	_lang = lang;
 	// If no explicit language preference was saved, detect from browser
 	if (!serverSettings?.lang) {
