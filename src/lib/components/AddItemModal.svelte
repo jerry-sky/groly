@@ -49,12 +49,18 @@
 	}
 </script>
 
-<!-- svelte-ignore a11y_click_events_have_key_events -->
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="fixed inset-0 z-50" style="background-color: rgba(0,0,0,0.6)" onclick={onClose}></div>
+<button
+	type="button"
+	class="fixed inset-0 z-50"
+	style="background-color: rgba(0,0,0,0.6)"
+	aria-label={t.close}
+	onclick={onClose}
+></button>
 
-<div class="fixed bottom-0 left-0 right-0 z-[60] max-w-[430px] mx-auto rounded-t-3xl px-6 pb-8 pt-4"
-     style="background-color: var(--color-surface-low)">
+<div
+	class="fixed top-0 left-0 right-0 z-[60] max-w-[430px] mx-auto rounded-b-3xl px-6 pb-6 shadow-2xl max-h-[85dvh] overflow-y-auto"
+	style="background-color: var(--color-surface-low); padding-top: calc(env(safe-area-inset-top) + 0.75rem)"
+>
 	<div class="flex justify-center mb-4">
 		<div class="w-10 h-1 rounded-full" style="background-color: var(--color-surface-high)"></div>
 	</div>
