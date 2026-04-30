@@ -33,6 +33,7 @@
 	let favAddedFeedback = $state(false);
 	let pressTimer: ReturnType<typeof setTimeout> | null = null;
 	let favScrollEl: HTMLElement | null = $state(null);
+	let selectedSuggestionIndex = $state(-1);
 
 	// Sort favorites by category order
 	const CATEGORY_ORDER = new Map<string, number>(CATEGORIES.map((c, i) => [c.key, i]));
@@ -124,10 +125,16 @@
 			: []
 	);
 
+	$effect(() => {
+		if (selectedSuggestionIndex >= filtered.length) selectedSuggestionIndex = filtered.length - 1;
+		if (filtered.length === 0) selectedSuggestionIndex = -1;
+	});
+
 	async function handleAdd() {
 		if (!name.trim() || adding) return;
 		adding = true;
 		showSuggestions = false;
+		selectedSuggestionIndex = -1;
 
 		if (isMultiItem) {
 			for (const item of parsedItems) {
@@ -146,6 +153,7 @@
 
 	async function pickSuggestion(s: string) {
 		showSuggestions = false;
+		selectedSuggestionIndex = -1;
 		name = '';
 		quantityInfo = '';
 		await onAdd(s, '');
@@ -153,8 +161,34 @@
 		nameInput?.focus();
 	}
 
+	async function focusSelectedSuggestion() {
+		await tick();
+		document.querySelector<HTMLElement>(`[data-add-suggestion-index="${selectedSuggestionIndex}"]`)?.focus();
+	}
+
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter') handleAdd();
+		if (filtered.length > 0 && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+			e.preventDefault();
+			showSuggestions = true;
+			selectedSuggestionIndex = 0;
+			void focusSelectedSuggestion();
+			return;
+		}
+		if (filtered.length > 0 && selectedSuggestionIndex >= 0 && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+			e.preventDefault();
+			const delta = e.key === 'ArrowRight' ? 1 : -1;
+			selectedSuggestionIndex = (selectedSuggestionIndex + delta + filtered.length) % filtered.length;
+			void focusSelectedSuggestion();
+			return;
+		}
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			if (showSuggestions && selectedSuggestionIndex >= 0 && filtered[selectedSuggestionIndex]) {
+				void pickSuggestion(filtered[selectedSuggestionIndex]);
+				return;
+			}
+			void handleAdd();
+		}
 		if (e.key === 'Escape') onClose();
 	}
 
@@ -356,21 +390,23 @@
 		{:else}
 			<!-- === Normal-Modus === -->
 
-			<!-- Suggestions -->
-			{#if filtered.length > 0 && showSuggestions}
-				<div class="flex gap-2 flex-wrap mb-3">
+			<!-- Suggestions: space is reserved so chips appearing above the new-item fields do not move the sheet. -->
+			<div class="flex gap-2 flex-wrap mb-3 min-h-[2rem]">
+				{#if filtered.length > 0 && showSuggestions}
 					{#each filtered as s}
 						<button
+							data-add-suggestion-index={filtered.indexOf(s)}
 							onpointerdown={(e) => e.preventDefault()}
 							onclick={() => pickSuggestion(s)}
+							onkeydown={handleKeydown}
 							class="px-3 py-1.5 rounded-full text-xs font-medium"
-							style="background-color: color-mix(in srgb, var(--color-primary) 15%, transparent); color: var(--color-primary)"
+							style="background-color: color-mix(in srgb, var(--color-primary) {filtered[selectedSuggestionIndex] === s ? '32%' : '15%'}, transparent); color: var(--color-primary)"
 						>
 							{s}
 						</button>
 					{/each}
-				</div>
-			{/if}
+				{/if}
+			</div>
 
 			<!-- Eingabefelder -->
 			<div class="space-y-2 mb-3">
@@ -411,7 +447,7 @@
 					type="text"
 					placeholder={t.item_name_label}
 					bind:value={name}
-					oninput={() => showSuggestions = true}
+					oninput={() => { showSuggestions = true; selectedSuggestionIndex = -1; }}
 					onkeydown={handleKeydown}
 					autofocus={!autoOpenScanner}
 					autocomplete="off"

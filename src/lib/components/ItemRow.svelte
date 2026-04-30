@@ -16,6 +16,8 @@
 		onExitEmpty = null,
 		onReorderMove = null,
 		onReorderGrab = null,
+		suggestions = [],
+		onSuggestionPick = null,
 		createdByUsername = null,
 		currentUsername = null,
 		isFavorite = false,
@@ -30,6 +32,8 @@
 		onExitEmpty?: (() => void) | null;
 		onReorderMove?: ((dir: -1 | 1) => void) | null;
 		onReorderGrab?: ((e: PointerEvent) => void) | null;
+		suggestions?: string[];
+		onSuggestionPick?: ((name: string) => void) | null;
 		createdByUsername?: string | null;
 		currentUsername?: string | null;
 		isFavorite?: boolean;
@@ -46,6 +50,30 @@
 	let pressTimer: ReturnType<typeof setTimeout> | null = null;
 	let longFired = $state(false);
 	let nameHost = $state<HTMLElement | null>(null);
+	let draftName = $state('');
+	let nameFocused = $state(false);
+	let draftTouched = $state(false);
+
+	$effect(() => {
+		if (!nameFocused) {
+			draftName = item.name;
+			draftTouched = false;
+		}
+	});
+
+	const filteredSuggestions = $derived(
+		draftName.trim().length > 0
+			? suggestions
+				.filter(s => s.toLowerCase().includes(draftName.trim().toLowerCase()) && s.toLowerCase() !== draftName.trim().toLowerCase())
+				.slice(0, 5)
+			: []
+	);
+	const reserveSuggestionSpace = $derived(interactionMode === 'editing' && item.name.trim() === '');
+	const showInlineSuggestions = $derived(
+		interactionMode === 'editing' &&
+			(reserveSuggestionSpace || (nameFocused && draftTouched)) &&
+			filteredSuggestions.length > 0
+	);
 
 	function consumeLongPress(): boolean {
 		if (!longFired) return false;
@@ -94,7 +122,7 @@
 
 <!-- One physical row for both modes: normal disables the inline editor; edit enables it and swaps the reserved right slot to a grab handle. -->
 <div
-	class="w-full flex items-center h-[54px] px-3.5 gap-2 transition-opacity select-none {interactionMode === 'normal' ? 'active:opacity-70' : 'cursor-text'}"
+	class="w-full flex items-center px-3.5 gap-2 transition-opacity select-none {interactionMode === 'normal' ? 'h-[54px] active:opacity-70' : reserveSuggestionSpace || showInlineSuggestions ? 'min-h-[92px] py-3 cursor-text' : 'h-[54px] cursor-text'}"
 	style="background-color: var(--color-surface-card); touch-action: pan-y;"
 	onpointerdown={startLongPress}
 	onpointerup={stopLongPress}
@@ -115,22 +143,41 @@
 		{/if}
 	</div>
 
-	<div class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
-		<InlineItemName
-			bind:hostEl={nameHost}
-			itemId={item.id}
-			name={item.name}
-			editingEnabled={interactionMode === 'editing'}
-			class="text-sm font-bold leading-none min-w-0 flex-1 outline-none max-h-[3.25rem] overflow-y-auto [&:not(:focus)]:truncate"
-			style="color: var(--color-on-surface)"
-			onCommit={onCommitName}
-			onVerticalNavigate={onVerticalNavigate}
-			onEnterNewBelow={onEnterNewBelow}
-			onExitEmpty={onExitEmpty}
-		/>
-		{#if item.quantityInfo}
-			<span class="text-[10px] font-semibold leading-none flex-shrink-0"
-			      style="color: {category.color}">{item.quantityInfo}</span>
+	<div class="flex-1 min-w-0 overflow-hidden">
+		<div class="flex items-baseline gap-1.5 overflow-hidden">
+			<InlineItemName
+				bind:hostEl={nameHost}
+				itemId={item.id}
+				name={item.name}
+				editingEnabled={interactionMode === 'editing'}
+				class="text-sm font-bold leading-none min-w-0 flex-1 outline-none max-h-[3.25rem] overflow-y-auto [&:not(:focus)]:truncate"
+				style="color: var(--color-on-surface)"
+				onCommit={onCommitName}
+				onVerticalNavigate={onVerticalNavigate}
+				onEnterNewBelow={onEnterNewBelow}
+				onExitEmpty={onExitEmpty}
+				onDraftChange={(next) => { draftName = next; draftTouched = true; }}
+				onFocusChange={(next) => { nameFocused = next; if (!next) draftTouched = false; }}
+			/>
+			{#if item.quantityInfo}
+				<span class="text-[10px] font-semibold leading-none flex-shrink-0"
+				      style="color: {category.color}">{item.quantityInfo}</span>
+			{/if}
+		</div>
+		{#if showInlineSuggestions || reserveSuggestionSpace}
+			<div class="flex gap-1.5 flex-wrap mt-2 min-h-[1.625rem]">
+				{#each filteredSuggestions as s}
+					<button
+						type="button"
+						onpointerdown={(e) => e.preventDefault()}
+						onclick={(e) => { e.stopPropagation(); draftName = s; draftTouched = false; onSuggestionPick?.(s); }}
+						class="px-3 py-1.5 rounded-full text-xs font-medium"
+						style="background-color: color-mix(in srgb, var(--color-primary) 15%, transparent); color: var(--color-primary)"
+					>
+						{s}
+					</button>
+				{/each}
+			</div>
 		{/if}
 	</div>
 

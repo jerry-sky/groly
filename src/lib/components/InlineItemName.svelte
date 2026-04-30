@@ -11,6 +11,8 @@
 		onVerticalNavigate = null,
 		onEnterNewBelow = null,
 		onExitEmpty = null,
+		onDraftChange = null,
+		onFocusChange = null,
 	}: {
 		name: string;
 		itemId?: string | null;
@@ -22,6 +24,8 @@
 		onVerticalNavigate?: ((dir: -1 | 1) => void) | null;
 		onEnterNewBelow?: ((trimmed: string) => void) | null;
 		onExitEmpty?: (() => void) | null;
+		onDraftChange?: ((draft: string) => void) | null;
+		onFocusChange?: ((focused: boolean) => void) | null;
 	} = $props();
 
 	let focused = $state(false);
@@ -53,6 +57,7 @@
 
 	function handleFocus() {
 		focused = true;
+		onFocusChange?.(true);
 		if (!hostEl || !editingEnabled) return;
 		requestAnimationFrame(() => {
 			if (!hostEl || document.activeElement !== hostEl) return;
@@ -62,6 +67,7 @@
 
 	function handleBlur() {
 		focused = false;
+		onFocusChange?.(false);
 		if (!hostEl) return;
 		const raw = hostEl.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 		// Empty line while editing: remove row via parent (no revert — Escape only blurs without restoring DOM).
@@ -102,6 +108,11 @@
 		const text = e.clipboardData?.getData('text/plain').replace(/\r?\n/g, ' ') ?? '';
 		document.execCommand('insertText', false, text);
 	}
+
+	function handleInput() {
+		if (!editingEnabled || !hostEl) return;
+		onDraftChange?.(hostEl.textContent?.replace(/\s+/g, ' ') ?? '');
+	}
 </script>
 
 <span
@@ -116,6 +127,7 @@
 	onfocus={handleFocus}
 	onblur={handleBlur}
 	onkeydown={handleKeydown}
+	oninput={handleInput}
 	onpaste={handlePaste}
 	onbeforeinput={(e) => {
 		if (!editingEnabled) return;

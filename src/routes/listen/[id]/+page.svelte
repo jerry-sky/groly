@@ -134,6 +134,17 @@
 		return items.find(item => item.id !== exceptId && canonicalItemName(item.name) === key) ?? null;
 	}
 
+	function openItemsWithRestoredDuplicate(anchor: Item, duplicate: Item): Item[] {
+		const next = openItems.filter(item => item.id !== duplicate.id);
+		const anchorIndex = next.findIndex(item => item.id === anchor.id);
+		const restored = { ...duplicate, isChecked: false, checkedAt: null };
+		if (anchorIndex < 0) return [...next, restored];
+		if (!anchor.name.trim()) {
+			return [...next.slice(0, anchorIndex), restored, ...next.slice(anchorIndex + 1)];
+		}
+		return [...next.slice(0, anchorIndex + 1), restored, ...next.slice(anchorIndex + 1)];
+	}
+
 	async function flashExistingItem(item: Item, { focusEditor = false }: { focusEditor?: boolean } = {}) {
 		closeSearch();
 		flashingItemId = null;
@@ -152,6 +163,54 @@
 			flashingItemId = null;
 			flashTimer = null;
 		}, 2500);
+	}
+
+	async function restoreCheckedDuplicateAt(anchor: Item, duplicate: Item) {
+		const nextOpenItems = openItemsWithRestoredDuplicate(anchor, duplicate);
+		const nextOrder = new Map(nextOpenItems.map((item, index) => [item.id, (index + 1) * 1000]));
+		const duplicateSortOrder = nextOrder.get(duplicate.id) ?? sortOrderForNewItem(anchor.id);
+		const clientUpdatedAt = duplicate.updatedAt;
+		const ts = Math.floor(Date.now() / 1000);
+		const removeAnchor = !anchor.name.trim();
+
+		await execute(
+			() =>
+				fetch(`/api/items/${duplicate.id}`, {
+					method: 'PUT',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ isChecked: false, sortOrder: duplicateSortOrder, clientUpdatedAt })
+				}).then(r => {
+					if (!r.ok) throw new Error();
+				}),
+			{
+				type: 'update_item',
+				payload: { id: duplicate.id, isChecked: false, sortOrder: duplicateSortOrder, clientUpdatedAt },
+				createdAt: Date.now()
+			},
+			() => {
+				items = items
+					.map(item => {
+						const sortOrder = nextOrder.get(item.id);
+						if (item.id === duplicate.id) {
+							return { ...item, isChecked: false, checkedAt: null, sortOrder: duplicateSortOrder, updatedAt: ts };
+						}
+						return sortOrder ? { ...item, sortOrder, updatedAt: ts } : item;
+					})
+					.filter(item => !removeAnchor || item.id !== anchor.id);
+				void updateOfflineItem(duplicate.id, {
+					isChecked: false,
+					checkedAt: null,
+					sortOrder: duplicateSortOrder,
+					updatedAt: ts
+				});
+				void cacheItemsData(items);
+			}
+		);
+
+		if (removeAnchor) await deleteItem(anchor.id);
+		await persistOpenItemOrder(nextOpenItems);
+		await tick();
+		await flashExistingItem({ ...duplicate, isChecked: false, checkedAt: null, sortOrder: duplicateSortOrder }, { focusEditor: true });
 	}
 
 	async function loadItems() {
@@ -230,12 +289,16 @@
 		localStorage.setItem(LIST_INTERACTION_MODE_KEY, m);
 	}
 
-	async function saveItemInlineName(item: Item, newName: string): Promise<'saved' | 'duplicate' | 'unchanged'> {
+	async function saveItemInlineName(item: Item, newName: string): Promise<'saved' | 'duplicate' | 'restored' | 'unchanged'> {
 		if (userPermission === 'read') return 'unchanged';
 		const trimmed = newName.trim();
 		if (!trimmed || trimmed === item.name) return 'unchanged';
 		const duplicate = findDuplicateItem(trimmed, item.id);
 		if (duplicate) {
+			if (duplicate.isChecked) {
+				await restoreCheckedDuplicateAt(item, duplicate);
+				return 'restored';
+			}
 			await flashExistingItem(duplicate, { focusEditor: true });
 			return 'duplicate';
 		}
@@ -258,6 +321,29 @@
 			}
 		);
 		return 'saved';
+	}
+
+	async function commitInlineName(item: Item, newName: string) {
+		const result = await saveItemInlineName(item, newName);
+		if (result === 'duplicate' && !item.name.trim()) {
+			await handleInlineExitEmpty(item);
+		}
+	}
+
+	async function pickInlineSuggestion(item: Item, name: string) {
+		const result = await saveItemInlineName(item, name);
+		if (result === 'duplicate' && !item.name.trim()) {
+			await handleInlineExitEmpty(item);
+			return;
+		}
+		if (result !== 'duplicate') {
+			await tick();
+			const editor = document.querySelector<HTMLElement>(`[data-item-editor="${CSS.escape(item.id)}"]`);
+			if (editor) {
+				editor.textContent = name;
+				editor.focus();
+			}
+		}
 	}
 
 	async function navigateItemVertical(fromItem: Item, dir: -1 | 1) {
@@ -310,6 +396,7 @@
 				if (!fromItem.name.trim()) await handleInlineExitEmpty(fromItem);
 				return;
 			}
+			if (result === 'restored') return;
 		}
 		const basis = items.find(i => i.id === fromItem.id) ?? fromItem;
 		const cat = categoryOverrideForNewRowAfter(basis);
@@ -854,12 +941,14 @@
 									{item}
 									interactionMode={effectiveListInteractionMode}
 									onTap={() => toggleItemFromView(item)}
-									onCommitName={(name) => void saveItemInlineName(item, name)}
+									onCommitName={(name) => void commitInlineName(item, name)}
 									onVerticalNavigate={(d) => void navigateItemVertical(item, d)}
 									onEnterNewBelow={(nextName) => void inlineEnterNewBelow(item, nextName)}
 									onExitEmpty={() => void handleInlineExitEmpty(item)}
 									onReorderMove={(d) => moveOpenItem(item, d)}
 									onReorderGrab={(e) => startReorderDrag(e, item)}
+									{suggestions}
+									onSuggestionPick={(name) => void pickInlineSuggestion(item, name)}
 									onLongPress={() => openItemEdit(item)}
 									createdByUsername={item.createdByUsername}
 									currentUsername={data.user?.username ?? null}
@@ -887,12 +976,14 @@
 								{item}
 								interactionMode={effectiveListInteractionMode}
 								onTap={() => toggleItemFromView(item)}
-								onCommitName={(name) => void saveItemInlineName(item, name)}
+								onCommitName={(name) => void commitInlineName(item, name)}
 								onVerticalNavigate={(d) => void navigateItemVertical(item, d)}
 								onEnterNewBelow={(nextName) => void inlineEnterNewBelow(item, nextName)}
 								onExitEmpty={() => void handleInlineExitEmpty(item)}
 								onReorderMove={(d) => moveOpenItem(item, d)}
 								onReorderGrab={(e) => startReorderDrag(e, item)}
+								{suggestions}
+								onSuggestionPick={(name) => void pickInlineSuggestion(item, name)}
 								onLongPress={() => openItemEdit(item)}
 								createdByUsername={item.createdByUsername}
 								currentUsername={data.user?.username ?? null}

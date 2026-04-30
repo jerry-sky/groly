@@ -17,6 +17,8 @@
 		onExitEmpty = null,
 		onReorderMove = null,
 		onReorderGrab = null,
+		suggestions = [],
+		onSuggestionPick = null,
 		createdByUsername = null,
 		currentUsername = null,
 		isFavorite = false,
@@ -31,6 +33,8 @@
 		onExitEmpty?: (() => void) | null;
 		onReorderMove?: ((dir: -1 | 1) => void) | null;
 		onReorderGrab?: ((e: PointerEvent) => void) | null;
+		suggestions?: string[];
+		onSuggestionPick?: ((name: string) => void) | null;
 		createdByUsername?: string | null;
 		currentUsername?: string | null;
 		isFavorite?: boolean;
@@ -52,6 +56,30 @@
 
 	let nameEl = $state<HTMLElement | null>(null);
 	let isTruncated = $state(false);
+	let draftName = $state('');
+	let nameFocused = $state(false);
+	let draftTouched = $state(false);
+
+	$effect(() => {
+		if (!nameFocused) {
+			draftName = item.name;
+			draftTouched = false;
+		}
+	});
+
+	const filteredSuggestions = $derived(
+		draftName.trim().length > 0
+			? suggestions
+				.filter(s => s.toLowerCase().includes(draftName.trim().toLowerCase()) && s.toLowerCase() !== draftName.trim().toLowerCase())
+				.slice(0, 3)
+			: []
+	);
+	const reserveSuggestionSpace = $derived(interactionMode === 'editing' && item.name.trim() === '');
+	const showInlineSuggestions = $derived(
+		interactionMode === 'editing' &&
+			(reserveSuggestionSpace || (nameFocused && draftTouched)) &&
+			filteredSuggestions.length > 0
+	);
 
 	let touchStartX = 0;
 	let touchStartY = 0;
@@ -247,6 +275,8 @@
 						onVerticalNavigate={onVerticalNavigate}
 						onEnterNewBelow={onEnterNewBelow}
 						onExitEmpty={onExitEmpty}
+						onDraftChange={(next) => { draftName = next; draftTouched = true; }}
+						onFocusChange={(next) => { nameFocused = next; if (!next) draftTouched = false; }}
 					/>
 					<button
 						type="button"
@@ -269,6 +299,21 @@
 						</svg>
 					</button>
 				</div>
+				{#if showInlineSuggestions || reserveSuggestionSpace}
+					<div class="flex gap-1 flex-wrap min-h-[1.35rem] overflow-hidden">
+						{#each filteredSuggestions as s}
+							<button
+								type="button"
+								onpointerdown={(e) => e.preventDefault()}
+								onclick={(e) => { e.stopPropagation(); draftName = s; draftTouched = false; onSuggestionPick?.(s); }}
+								class="px-2 py-1 rounded-full text-[10px] font-medium truncate max-w-full"
+								style="background-color: color-mix(in srgb, var(--color-primary) 15%, transparent); color: var(--color-primary)"
+							>
+								{s}
+							</button>
+						{/each}
+					</div>
+				{/if}
 				<span class="text-[10px] leading-tight text-center truncate w-full pointer-events-none"
 				      style="color: {category.color}; visibility: {item.quantityInfo ? 'visible' : 'hidden'}">
 					{item.quantityInfo || '\u00a0'}
