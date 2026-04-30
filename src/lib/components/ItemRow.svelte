@@ -73,15 +73,14 @@
 		onLongPress();
 	}
 
-	function handleClick() {
-		if (consumeLongPress()) return;
-		onTap();
-	}
-
-	function handleEditRowSurfaceClick(e: MouseEvent) {
+	function handleSurfaceClick(e: MouseEvent) {
 		if (consumeLongPress()) return;
 		const target = e.target as HTMLElement;
 		if (target.closest('[data-list-reorder-handle]')) return;
+		if (interactionMode === 'normal') {
+			onTap();
+			return;
+		}
 		if (target.closest('[data-inline-item-name]')) return;
 		nameHost?.focus();
 	}
@@ -93,93 +92,49 @@
 	}
 </script>
 
-<!-- Normal: tap row toggles checked; long-press opens item modal. Edit: see comment on branch below. -->
-{#if interactionMode === 'normal'}
-	<button
-		onclick={handleClick}
-		onpointerdown={startLongPress}
-		onpointerup={stopLongPress}
-		onpointerleave={stopLongPress}
-		onpointercancel={stopLongPress}
-		oncontextmenu={handleLongPressContextMenu}
-		class="w-full flex items-center h-[54px] px-3.5 gap-2.5 active:opacity-70 transition-opacity select-none text-left"
-		style="background-color: var(--color-surface-card); touch-action: pan-y;"
-	>
-		<div class="relative flex-shrink-0">
-			<svg width="22" height="22" viewBox="0 0 24 24" fill="none"
-			     stroke={category.color} stroke-width="1.3"
-			     stroke-linecap="round" stroke-linejoin="round">
-				{@html category.svgContent}
-			</svg>
-			{#if isFavorite && userSettings.showFavoriteIndicator}
-				<span class="absolute -top-1 -left-1 w-1.5 h-1.5 rounded-full"
-				      style="background-color: var(--color-primary)" aria-hidden="true"></span>
-			{/if}
-		</div>
-
-		<div class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
-			<InlineItemName
-				itemId={item.id}
-				name={item.name}
-				editingEnabled={false}
-				class="text-sm font-bold leading-none truncate flex-shrink-1 min-w-0"
-				style="color: var(--color-on-surface)"
-				onCommit={onCommitName}
-			/>
-			{#if item.quantityInfo}
-				<span class="text-[10px] font-semibold leading-none flex-shrink-0"
-				      style="color: {category.color}">{item.quantityInfo}</span>
-			{/if}
-		</div>
-
-		{#if showCreator}
-			<span class="text-[10px] font-semibold flex-shrink-0"
-			      style="color: var(--color-on-surface-variant)">{displayCreator}</span>
+<!-- One physical row for both modes: normal disables the inline editor; edit enables it and swaps the reserved right slot to a grab handle. -->
+<div
+	class="w-full flex items-center h-[54px] px-3.5 gap-2 transition-opacity select-none {interactionMode === 'normal' ? 'active:opacity-70' : 'cursor-text'}"
+	style="background-color: var(--color-surface-card); touch-action: pan-y;"
+	onpointerdown={startLongPress}
+	onpointerup={stopLongPress}
+	onpointerleave={stopLongPress}
+	onpointercancel={stopLongPress}
+	onclick={handleSurfaceClick}
+	oncontextmenu={handleLongPressContextMenu}
+>
+	<div class="relative flex-shrink-0 w-9 flex items-center justify-center pointer-events-none -ml-1">
+		<svg width="22" height="22" viewBox="0 0 24 24" fill="none"
+		     stroke={category.color} stroke-width="1.3"
+		     stroke-linecap="round" stroke-linejoin="round">
+			{@html category.svgContent}
+		</svg>
+		{#if isFavorite && userSettings.showFavoriteIndicator}
+			<span class="absolute -top-1 -left-1 w-1.5 h-1.5 rounded-full"
+			      style="background-color: var(--color-primary)" aria-hidden="true"></span>
 		{/if}
-	</button>
-{:else}
-	<!-- Edit mode: category icon is decorative; row tap focuses inline name; grab handle reorders without checking off. -->
-	<div
-		class="w-full flex items-center h-[54px] px-3.5 gap-2 transition-opacity cursor-text"
-		style="background-color: var(--color-surface-card); touch-action: pan-y;"
-		onpointerdown={startLongPress}
-		onpointerup={stopLongPress}
-		onpointerleave={stopLongPress}
-		onpointercancel={stopLongPress}
-		onclick={handleEditRowSurfaceClick}
-		oncontextmenu={handleLongPressContextMenu}
-	>
-		<div class="relative flex-shrink-0 w-9 flex items-center justify-center pointer-events-none -ml-1">
-			<svg width="22" height="22" viewBox="0 0 24 24" fill="none"
-			     stroke={category.color} stroke-width="1.3"
-			     stroke-linecap="round" stroke-linejoin="round">
-				{@html category.svgContent}
-			</svg>
-			{#if isFavorite && userSettings.showFavoriteIndicator}
-				<span class="absolute -top-1 -left-1 w-1.5 h-1.5 rounded-full"
-				      style="background-color: var(--color-primary)" aria-hidden="true"></span>
-			{/if}
-		</div>
+	</div>
 
-		<div class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
-			<InlineItemName
-				bind:hostEl={nameHost}
-				itemId={item.id}
-				name={item.name}
-				editingEnabled={true}
-				class="text-sm font-bold leading-none min-w-0 flex-1 outline-none max-h-[3.25rem] overflow-y-auto [&:not(:focus)]:truncate"
-				style="color: var(--color-on-surface)"
-				onCommit={onCommitName}
-				onVerticalNavigate={onVerticalNavigate}
-				onEnterNewBelow={onEnterNewBelow}
-				onExitEmpty={onExitEmpty}
-			/>
-			{#if item.quantityInfo}
-				<span class="text-[10px] font-semibold leading-none flex-shrink-0"
-				      style="color: {category.color}">{item.quantityInfo}</span>
-			{/if}
-		</div>
+	<div class="flex-1 min-w-0 flex items-baseline gap-1.5 overflow-hidden">
+		<InlineItemName
+			bind:hostEl={nameHost}
+			itemId={item.id}
+			name={item.name}
+			editingEnabled={interactionMode === 'editing'}
+			class="text-sm font-bold leading-none min-w-0 flex-1 outline-none max-h-[3.25rem] overflow-y-auto [&:not(:focus)]:truncate"
+			style="color: var(--color-on-surface)"
+			onCommit={onCommitName}
+			onVerticalNavigate={onVerticalNavigate}
+			onEnterNewBelow={onEnterNewBelow}
+			onExitEmpty={onExitEmpty}
+		/>
+		{#if item.quantityInfo}
+			<span class="text-[10px] font-semibold leading-none flex-shrink-0"
+			      style="color: {category.color}">{item.quantityInfo}</span>
+		{/if}
+	</div>
 
+	{#if interactionMode === 'editing'}
 		<button
 			type="button"
 			data-list-reorder-handle
@@ -200,10 +155,12 @@
 				<circle cx="15" cy="18" r="1" fill="currentColor" stroke="none" />
 			</svg>
 		</button>
+	{:else}
+		<div class="flex-shrink-0 w-9 h-9" aria-hidden="true"></div>
+	{/if}
 
-		{#if showCreator}
-			<span class="text-[10px] font-semibold flex-shrink-0"
-			      style="color: var(--color-on-surface-variant)">{displayCreator}</span>
-		{/if}
-	</div>
-{/if}
+	{#if showCreator}
+		<span class="text-[10px] font-semibold flex-shrink-0"
+		      style="color: var(--color-on-surface-variant)">{displayCreator}</span>
+	{/if}
+</div>
