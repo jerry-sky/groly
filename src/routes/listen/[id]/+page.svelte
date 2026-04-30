@@ -43,7 +43,6 @@
 	let userPermission = $state<'owner' | 'write' | 'read'>('write');
 	let searchQuery = $state('');
 	let searchOpen = $state(false);
-	let keyboardOpen = $state(false);
 	let scrollContainer = $state<HTMLDivElement | null>(null);
 	let autoScannerOnOpen = $state(false);
 	let autoFavoritesOnOpen = $state(false);
@@ -101,8 +100,6 @@
 			       .filter(i => i.name.toLowerCase().includes(searchQuery.toLowerCase()))
 			: checkedItems
 	);
-	// Empty prefix slots so the grid fills bottom-up (empty slots at top-left)
-	const gridPrefix = $derived(displayItems.length % 3 === 0 ? 0 : 3 - (displayItems.length % 3));
 	const totalSearchResults = $derived(displayItems.length + (searchQuery.trim() ? displayCheckedItems.length : 0));
 	const headerSubtitle = $derived(
 		searchQuery.trim() ? list_search_results_subtitle(totalSearchResults) : list_items_open(openCount)
@@ -227,15 +224,17 @@
 			if (requestVersion !== itemsLoadVersion || targetListId !== (listId ?? '')) return;
 			if (cachedItems.length > 0) {
 				listName = cachedName || listName;
-				items = cachedItems.map(item => ({
-					...item,
-					sortOrder: item.sortOrder ?? 0,
-					createdAt: item.createdAt ?? item.updatedAt,
-					createdByUsername: null
-				}));
+				items = cachedItems
+					.filter(item => item.name.trim().length > 0)
+					.map(item => ({
+						...item,
+						sortOrder: item.sortOrder ?? 0,
+						createdAt: item.createdAt ?? item.updatedAt,
+						createdByUsername: null
+					}));
 				loading = false;
 				await tick();
-				scrollContainer?.scrollTo({ top: scrollContainer.scrollHeight });
+				scrollContainer?.scrollTo({ top: 0 });
 			}
 		}
 
@@ -266,18 +265,20 @@
 			if (items.length === 0) {
 				listName = await getOfflineListName(targetListId);
 				if (requestVersion !== itemsLoadVersion || targetListId !== (listId ?? '')) return;
-				items = (await getOfflineItems(targetListId)).map(item => ({
-					...item,
-					sortOrder: item.sortOrder ?? 0,
-					createdAt: item.createdAt ?? item.updatedAt,
-					createdByUsername: null
-				}));
+				items = (await getOfflineItems(targetListId))
+					.filter(item => item.name.trim().length > 0)
+					.map(item => ({
+						...item,
+						sortOrder: item.sortOrder ?? 0,
+						createdAt: item.createdAt ?? item.updatedAt,
+						createdByUsername: null
+					}));
 			}
 		}
 		if (requestVersion !== itemsLoadVersion || targetListId !== (listId ?? '')) return;
 		loading = false;
 		await tick();
-		scrollContainer?.scrollTo({ top: scrollContainer.scrollHeight });
+		scrollContainer?.scrollTo({ top: 0 });
 	}
 
 	function setListInteractionMode(m: ListInteractionMode) {
@@ -724,17 +725,6 @@
 			listInteractionMode = storedMode;
 		}
 
-		if (window.visualViewport) {
-			const onViewportResize = () => {
-				keyboardOpen = (window.innerHeight - window.visualViewport!.height) > 100;
-			};
-			window.visualViewport.addEventListener('resize', onViewportResize);
-			const removeViewport = () => window.visualViewport?.removeEventListener('resize', onViewportResize);
-			const removeOnline = () => window.removeEventListener('online', handleOnline);
-			const removeVisibility = () => document.removeEventListener('visibilitychange', handleVisibility);
-			return () => { removeOnline(); removeViewport(); removeVisibility(); };
-		}
-
 		const removeVisibility = () => document.removeEventListener('visibilitychange', handleVisibility);
 		return () => { window.removeEventListener('online', handleOnline); removeVisibility(); };
 	});
@@ -775,6 +765,7 @@
 		on('item_added', (ev) => {
 			if (ev.listId !== listId) return;
 			const item = normalizeItem(ev.item as Item);
+			if (!item.name.trim()) return;
 			if (!items.some(i => i.id === item.id)) {
 				items = [...items, item];
 				void cacheItemsData(items);
@@ -783,6 +774,11 @@
 		on('item_updated', (ev) => {
 			if (ev.listId !== listId) return;
 			const patch = ev.item as Partial<Item> & { id: string };
+			const existing = items.some(i => i.id === patch.id);
+			if (!existing && typeof patch.name === 'string' && patch.name.trim().length > 0) {
+				void loadItems();
+				return;
+			}
 			items = items.map(i =>
 				i.id === patch.id
 					? { ...i, ...patch, sortOrder: patch.sortOrder ?? i.sortOrder ?? 0, createdAt: i.createdAt ?? patch.updatedAt ?? i.updatedAt }
@@ -911,10 +907,10 @@
 		</div>
 	{/if}
 
-	<!-- Bottom-Anchored Content -->
+	<!-- Top-anchored content -->
 	<div bind:this={scrollContainer} class="flex-1 overflow-y-auto px-4 min-h-0"
 	     style="padding-top: {contentTop}; padding-bottom: 5rem">
-		<div class="min-h-full flex flex-col" class:justify-end={!searchQuery.trim() || !keyboardOpen}>
+		<div class="min-h-full flex flex-col">
 		{#if loading}
 			<div class="flex justify-center py-8">
 				<div class="w-6 h-6 rounded-full border-2 animate-spin"
@@ -937,7 +933,7 @@
 			{:else if displayItems.length > 0}
 
 				{#if userSettings.itemLayout === 'list'}
-					<!-- Listen-Ansicht: vertikale Zeilen, von unten nach oben -->
+					<!-- Listen-Ansicht: vertikale Zeilen, von oben nach unten -->
 					<div class="flex flex-col gap-1 mt-2">
 						{#each displayItems as item (item.id)}
 							<div
@@ -969,11 +965,6 @@
 				{:else}
 				<!-- Kachel-Ansicht: 3er-Grid -->
 				<div class="grid grid-cols-3 gap-2 mt-3" style={userSettings.categorySortEnabled && !manualOrderActive ? 'direction: rtl' : ''}>
-					{#if userSettings.categorySortEnabled && !manualOrderActive}
-						{#each { length: gridPrefix } as _}
-							<div class="aspect-square"></div>
-						{/each}
-					{/if}
 					{#each displayItems as item (item.id)}
 						<div
 							data-list-item-id={item.id}
@@ -1000,11 +991,6 @@
 							/>
 						</div>
 					{/each}
-					{#if !userSettings.categorySortEnabled || manualOrderActive}
-						{#each { length: gridPrefix } as _}
-							<div class="aspect-square"></div>
-						{/each}
-					{/if}
 				</div>
 				{/if}<!-- end grid/list if -->
 			{/if}

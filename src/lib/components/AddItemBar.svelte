@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { tick, onMount } from 'svelte';
 	import { t } from '$lib/i18n.svelte';
-	import { watchVisualViewportBottomOffset } from '$lib/visualViewport';
 	import { getCategoryForItem, getCategoryKey, CATEGORIES } from '$lib/categories';
 	import BarcodeScanner from './BarcodeScanner.svelte';
 
@@ -22,7 +21,6 @@
 	let adding = $state(false);
 	let nameInput = $state<HTMLInputElement | undefined>(undefined);
 	let showSuggestions = $state(false);
-	let bottomOffset = $state(0);
 	let scannerOpen = $state(false);
 	let favoritesOpen = $state(false);
 	let addedName = $state<string | null>(null);
@@ -84,9 +82,6 @@
 			nameInput?.focus();
 		}
 
-		return watchVisualViewportBottomOffset((offset) => {
-			bottomOffset = offset;
-		});
 	});
 
 	const isNumeric = $derived(/^\d+$/.test(quantityInfo.trim()) || quantityInfo.trim() === '');
@@ -207,10 +202,10 @@
 	onclick={onClose}
 ></button>
 
-<!-- Bottom sheet -->
-<div class="fixed left-0 right-0 z-[60] max-w-[430px] mx-auto" style="bottom: {bottomOffset}px">
-	<div class="rounded-t-3xl px-4 pb-6 pt-3 shadow-2xl"
-	     style="background-color: var(--color-surface-low)">
+<!-- Top sheet -->
+<div class="fixed left-0 right-0 top-0 z-[60] max-w-[430px] mx-auto">
+	<div class="rounded-b-3xl px-4 pb-5 shadow-2xl"
+	     style="background-color: var(--color-surface-low); padding-top: calc(env(safe-area-inset-top) + 0.75rem)">
 
 		<!-- Handle -->
 		<div class="flex justify-center mb-4">

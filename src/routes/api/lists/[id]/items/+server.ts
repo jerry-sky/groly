@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import { authGuard } from '$lib/auth/middleware';
 import { db } from '$lib/db';
 import { lists, items, listMembers, users, itemHistory } from '$lib/db/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, and, ne, sql } from 'drizzle-orm';
 import { emitToListMembers } from '$lib/server/userEvents';
 import { schedulePushForItemAdded } from '$lib/server/pushDebounce';
 import { now, generateId } from '$lib/auth';
@@ -46,7 +46,7 @@ export const GET: RequestHandler = async (event) => {
 		})
 		.from(items)
 		.leftJoin(users, eq(items.createdBy, users.id))
-		.where(eq(items.listId, event.params.id))
+		.where(and(eq(items.listId, event.params.id), ne(items.name, '')))
 		.all();
 
 	return json(listItems);
@@ -117,9 +117,8 @@ export const POST: RequestHandler = async (event) => {
 	const creator = db.select({ username: users.username }).from(users).where(eq(users.id, user!.id)).get();
 	const newItem = { id, listId: event.params.id, name: trimmedName, quantityInfo: trimmedQty, isChecked: false, checkedAt: null, categoryOverride: rawCat, sortOrder, createdBy: user!.id, createdByUsername: creator?.username ?? null, createdAt: ts, updatedAt: ts };
 
-	emitToListMembers(event.params.id, { type: 'item_added', listId: event.params.id, item: newItem, byUserId: user!.id });
-
 	if (trimmedName.length > 0) {
+		emitToListMembers(event.params.id, { type: 'item_added', listId: event.params.id, item: newItem, byUserId: user!.id });
 		schedulePushForItemAdded({
 			listId: event.params.id,
 			listName: list.name,
