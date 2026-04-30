@@ -3,7 +3,7 @@
 	import { t } from '$lib/i18n.svelte';
 	import { getCategoryForItem } from '$lib/categories';
 
-	type Item = { id: string; listId: string; name: string; quantityInfo: string | null; isChecked: boolean; checkedAt: number | null; categoryOverride: string | null; createdByUsername: string | null; updatedAt: number };
+	type Item = { id: string; listId: string; name: string; quantityInfo: string | null; isChecked: boolean; checkedAt: number | null; categoryOverride: string | null; sortOrder: number; createdByUsername: string | null; createdAt: number; updatedAt: number };
 
 	let { checkedItems, totalChecked, onUncheck, layout = 'grid' }: {
 		checkedItems: Item[];

@@ -83,6 +83,7 @@ class TranslationProxy {
 	get list_search_placeholder() { void _lang; return m.list_search_placeholder(); }
 	get list_search_close_aria() { void _lang; return m.list_search_close_aria(); }
 	get list_search_no_results() { void _lang; return m.list_search_no_results(); }
+	get list_reorder_handle_aria() { void _lang; return m.list_reorder_handle_aria(); }
 	get hint_dismiss_aria() { void _lang; return m.hint_dismiss_aria(); }
 	// item
 	get item_name_label() { void _lang; return m.item_name_label(); }

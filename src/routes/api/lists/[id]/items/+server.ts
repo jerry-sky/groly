@@ -34,6 +34,7 @@ export const GET: RequestHandler = async (event) => {
 			isChecked: items.isChecked,
 			checkedAt: items.checkedAt,
 			categoryOverride: items.categoryOverride,
+			sortOrder: items.sortOrder,
 			createdBy: items.createdBy,
 			createdByUsername: users.username,
 			createdAt: items.createdAt,
@@ -63,12 +64,13 @@ export const POST: RequestHandler = async (event) => {
 			? bodyCat
 			: null;
 	const trimmedQty = typeof quantityInfo === 'string' && quantityInfo.trim() ? quantityInfo.trim() : null;
+	const sortOrder = Number.isInteger(body.sortOrder) && body.sortOrder >= 0 ? body.sortOrder : 0;
 
 	const id = typeof clientId === 'string' && clientId.length > 0 && clientId.length <= 32
 		? clientId
 		: generateId(16);
 	const ts = now();
-	db.insert(items).values({ id, listId: event.params.id, name: trimmedName, quantityInfo: trimmedQty, isChecked: false, categoryOverride: rawCat, createdBy: user!.id, createdAt: ts, updatedAt: ts }).run();
+	db.insert(items).values({ id, listId: event.params.id, name: trimmedName, quantityInfo: trimmedQty, isChecked: false, categoryOverride: rawCat, sortOrder, createdBy: user!.id, createdAt: ts, updatedAt: ts }).run();
 
 	if (trimmedName.length > 0) {
 		// Item-History für Vorschläge aktualisieren
@@ -85,18 +87,20 @@ export const POST: RequestHandler = async (event) => {
 	db.update(lists).set({ updatedAt: ts }).where(eq(lists.id, event.params.id)).run();
 
 	const creator = db.select({ username: users.username }).from(users).where(eq(users.id, user!.id)).get();
-	const newItem = { id, listId: event.params.id, name: trimmedName, quantityInfo: trimmedQty, isChecked: false, checkedAt: null, categoryOverride: rawCat, createdBy: user!.id, createdByUsername: creator?.username ?? null, createdAt: ts, updatedAt: ts };
+	const newItem = { id, listId: event.params.id, name: trimmedName, quantityInfo: trimmedQty, isChecked: false, checkedAt: null, categoryOverride: rawCat, sortOrder, createdBy: user!.id, createdByUsername: creator?.username ?? null, createdAt: ts, updatedAt: ts };
 
 	emitToListMembers(event.params.id, { type: 'item_added', listId: event.params.id, item: newItem, byUserId: user!.id });
 
-	schedulePushForItemAdded({
-		listId: event.params.id,
-		listName: list.name,
-		itemName: trimmedName,
-		adderUserId: user!.id,
-		adderUsername: creator?.username ?? 'Jemand',
-		url: `/listen/${event.params.id}`
-	});
+	if (trimmedName.length > 0) {
+		schedulePushForItemAdded({
+			listId: event.params.id,
+			listName: list.name,
+			itemName: trimmedName,
+			adderUserId: user!.id,
+			adderUsername: creator?.username ?? 'Jemand',
+			url: `/listen/${event.params.id}`
+		});
+	}
 
 	return json(newItem, { status: 201 });
 };

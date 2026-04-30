@@ -17,6 +17,8 @@ interface OfflineItem {
 	isChecked: boolean;
 	checkedAt: number | null;
 	categoryOverride: string | null;
+	sortOrder: number;
+	createdAt: number;
 	updatedAt: number;
 }
 
@@ -28,6 +30,7 @@ interface PendingMutation {
 		| 'delete_list'
 		| 'create_item'
 		| 'update_item'
+		| 'reorder_items'
 		| 'delete_item'
 		| 'create_supplement_log'
 		| 'delete_supplement_log';
@@ -95,6 +98,7 @@ class GrolydDb extends Dexie {
 			recipes: 'id, updatedAt',
 			recipeDetails: 'id'
 		});
+		this.version(3).stores({});
 	}
 }
 

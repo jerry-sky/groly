@@ -44,6 +44,9 @@ async function processPendingMutations() {
 				case 'update_item':
 					await apiFetch(`/api/items/${mutation.payload.id}`, { method: 'PUT', body: JSON.stringify(mutation.payload) });
 					break;
+				case 'reorder_items':
+					await apiFetch(`/api/lists/${mutation.payload.listId}/items/reorder`, { method: 'POST', body: JSON.stringify(mutation.payload) });
+					break;
 				case 'delete_item':
 					await apiFetch(`/api/items/${mutation.payload.id}`, { method: 'DELETE' });
 					break;

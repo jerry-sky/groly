@@ -43,6 +43,9 @@ export const PUT: RequestHandler = async (event) => {
 		updates.checkedAt = body.isChecked ? ts : null;
 	}
 	if (body.categoryOverride !== undefined) updates.categoryOverride = body.categoryOverride ?? null;
+	if (body.sortOrder !== undefined && Number.isInteger(body.sortOrder) && body.sortOrder >= 0) {
+		updates.sortOrder = body.sortOrder;
+	}
 
 	db.update(items).set(updates).where(eq(items.id, item.id)).run();
 	db.update(lists).set({ updatedAt: ts }).where(eq(lists.id, item.listId)).run();
@@ -51,7 +54,7 @@ export const PUT: RequestHandler = async (event) => {
 	const openCountDelta = body.isChecked !== undefined
 		? (body.isChecked && !item.isChecked ? -1 : !body.isChecked && item.isChecked ? 1 : 0)
 		: 0;
-	emitToListMembers(item.listId, { type: 'item_updated', listId: item.listId, item: { id: updated.id, name: updated.name, quantityInfo: updated.quantityInfo, isChecked: updated.isChecked, checkedAt: updated.checkedAt, categoryOverride: updated.categoryOverride, updatedAt: updated.updatedAt }, openCountDelta, byUserId: user!.id });
+	emitToListMembers(item.listId, { type: 'item_updated', listId: item.listId, item: { id: updated.id, name: updated.name, quantityInfo: updated.quantityInfo, isChecked: updated.isChecked, checkedAt: updated.checkedAt, categoryOverride: updated.categoryOverride, sortOrder: updated.sortOrder, updatedAt: updated.updatedAt }, openCountDelta, byUserId: user!.id });
 
 	return json({ ok: true });
 };

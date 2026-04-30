@@ -11,11 +11,12 @@
 		interactionMode,
 		onTap,
 		onLongPress,
-		onToggleCheck,
 		onCommitName,
 		onVerticalNavigate = null,
 		onEnterNewBelow = null,
 		onExitEmpty = null,
+		onReorderMove = null,
+		onReorderGrab = null,
 		createdByUsername = null,
 		currentUsername = null,
 		isFavorite = false,
@@ -24,11 +25,12 @@
 		interactionMode: ListInteractionMode;
 		onTap: () => void;
 		onLongPress: () => void;
-		onToggleCheck: () => void;
 		onCommitName: (name: string) => void;
 		onVerticalNavigate?: ((dir: -1 | 1) => void) | null;
 		onEnterNewBelow?: ((trimmed: string) => void) | null;
 		onExitEmpty?: (() => void) | null;
+		onReorderMove?: ((dir: -1 | 1) => void) | null;
+		onReorderGrab?: ((e: PointerEvent) => void) | null;
 		createdByUsername?: string | null;
 		currentUsername?: string | null;
 		isFavorite?: boolean;
@@ -112,18 +114,18 @@
 		onTap();
 	}
 
-	function handleDoneClick(e: MouseEvent) {
-		e.stopPropagation();
-		if (consumeInteractionGuard()) return;
-		onToggleCheck();
-	}
-
 	function handleEditSurfaceClick(e: MouseEvent) {
 		if (consumeInteractionGuard({ includeSwipe: false })) return;
 		const target = e.target as HTMLElement;
-		if (target.closest('[data-tile-done-toggle]')) return;
+		if (target.closest('[data-tile-reorder-handle]')) return;
 		if (target.closest('[data-inline-item-name]')) return;
 		nameEl?.focus();
+	}
+
+	function handleReorderKeydown(e: KeyboardEvent) {
+		if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+		e.preventDefault();
+		onReorderMove?.(e.key === 'ArrowUp' ? -1 : 1);
 	}
 
 	function handleTouchStart(e: TouchEvent) {
@@ -200,8 +202,7 @@
 		</button>
 	</div>
 {:else}
-	<!-- Edit: category icon decorative; large tap target focuses name; small Done so checks don’t fire from name taps. -->
-	<!-- Bearbeiten: Kategorie nur Deko; größere Fläche fokussiert den Namen; Done nur kleiner Button -->
+	<!-- Edit: category icon decorative; large tap target focuses name; grab handle reorders without checking off. -->
 	<div class="relative aspect-square" style="direction: ltr">
 		<div
 			class="w-full h-full rounded-3xl relative overflow-hidden flex flex-col active:scale-95 transition-transform cursor-text"
@@ -249,16 +250,22 @@
 					/>
 					<button
 						type="button"
-						data-tile-done-toggle
-						class="flex-shrink-0 w-9 h-9 max-[374px]:w-8 max-[374px]:h-8 rounded-xl flex items-center justify-center active:opacity-70 mb-px"
-						style="touch-action: manipulation; background-color: var(--color-surface-high)"
-						aria-label={t.item_toggle_checked_aria}
-						onclick={handleDoneClick}
+						data-tile-reorder-handle
+						class="flex-shrink-0 w-9 h-9 max-[374px]:w-8 max-[374px]:h-8 rounded-xl flex items-center justify-center active:opacity-70 cursor-grab mb-px"
+						style="touch-action: manipulation; background-color: var(--color-surface-high); color: var(--color-on-surface-variant)"
+						aria-label={t.list_reorder_handle_aria}
+						onpointerdown={(e) => onReorderGrab?.(e)}
+						onkeydown={handleReorderKeydown}
 					>
 						<svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-						     stroke="var(--color-primary)" stroke-width="2.2"
+						     stroke="var(--color-on-surface-variant)" stroke-width="2"
 						     stroke-linecap="round" stroke-linejoin="round">
-							<polyline points="20 6 9 17 4 12" />
+							<circle cx="9" cy="6" r="1" fill="currentColor" stroke="none" />
+							<circle cx="15" cy="6" r="1" fill="currentColor" stroke="none" />
+							<circle cx="9" cy="12" r="1" fill="currentColor" stroke="none" />
+							<circle cx="15" cy="12" r="1" fill="currentColor" stroke="none" />
+							<circle cx="9" cy="18" r="1" fill="currentColor" stroke="none" />
+							<circle cx="15" cy="18" r="1" fill="currentColor" stroke="none" />
 						</svg>
 					</button>
 				</div>

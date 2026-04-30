@@ -211,6 +211,13 @@
       "when": 1745750000000,
       "tag": "0029_caffeine_tracker",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1777564800000,
+      "tag": "0030_item_sort_order",
+      "breakpoints": true
     }
   ]
 }

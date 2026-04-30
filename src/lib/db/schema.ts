@@ -79,6 +79,7 @@ export const items = sqliteTable('items', {
 	isChecked: integer('is_checked', { mode: 'boolean' }).notNull().default(false),
 	checkedAt: integer('checked_at'),
 	categoryOverride: text('category_override'),
+	sortOrder: integer('sort_order').notNull().default(0),
 	createdBy: text('created_by').references(() => users.id),
 	createdAt: integer('created_at').notNull(),
 	updatedAt: integer('updated_at').notNull()

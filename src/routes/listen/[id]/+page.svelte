@@ -26,7 +26,7 @@
 
 	let { data } = $props();
 
-	type Item = { id: string; listId: string; name: string; quantityInfo: string | null; isChecked: boolean; checkedAt: number | null; categoryOverride: string | null; createdByUsername: string | null; updatedAt: number };
+	type Item = { id: string; listId: string; name: string; quantityInfo: string | null; isChecked: boolean; checkedAt: number | null; categoryOverride: string | null; sortOrder: number; createdByUsername: string | null; createdAt: number; updatedAt: number };
 
 	type Favorite = { name: string; quantityInfo: string | null; categoryOverride: string | null };
 
@@ -49,6 +49,7 @@
 	let autoFavoritesOnOpen = $state(false);
 	let itemsLoadVersion = 0;
 	let listInteractionMode = $state<ListInteractionMode>('normal');
+	let reorderDragId = $state<string | null>(null);
 
 	const listId = $derived($page.params.id);
 	const showListModeBar = $derived(userPermission !== 'read');
@@ -59,8 +60,16 @@
 	const hintTopBaseRem = '5.5rem';
 	const modeBarRem = '2.875rem';
 	const panelRem = '3.5rem';
+	const manualOrderActive = $derived(items.some(i => !i.isChecked && (i.sortOrder ?? 0) > 0));
 	const openItems = $derived.by(() => {
 		const unchecked = items.filter(i => !i.isChecked);
+		if (manualOrderActive) {
+			return [...unchecked].sort((a, b) => {
+				const ao = (a.sortOrder ?? 0) > 0 ? a.sortOrder : Number.MAX_SAFE_INTEGER;
+				const bo = (b.sortOrder ?? 0) > 0 ? b.sortOrder : Number.MAX_SAFE_INTEGER;
+				return ao - bo || a.createdAt - b.createdAt;
+			});
+		}
 		const listSettings = listId ? userSettings.getListCategorySettings(listId) : null;
 		const sortEnabled = listSettings !== null ? listSettings.enabled : userSettings.categorySortEnabled;
 		if (!sortEnabled) return unchecked;
@@ -126,7 +135,12 @@
 			if (requestVersion !== itemsLoadVersion || targetListId !== (listId ?? '')) return;
 			if (cachedItems.length > 0) {
 				listName = cachedName || listName;
-				items = cachedItems.map(item => ({ ...item, createdByUsername: null }));
+				items = cachedItems.map(item => ({
+					...item,
+					sortOrder: item.sortOrder ?? 0,
+					createdAt: item.createdAt ?? item.updatedAt,
+					createdByUsername: null
+				}));
 				loading = false;
 				await tick();
 				scrollContainer?.scrollTo({ top: scrollContainer.scrollHeight });
@@ -145,7 +159,11 @@
 			if (requestVersion !== itemsLoadVersion || targetListId !== (listId ?? '')) return;
 			listName = listData.name;
 			userPermission = listData.userPermission ?? 'write';
-			const newItems: Item[] = await itemsRes.json();
+			const newItems: Item[] = (await itemsRes.json()).map((item: Item) => ({
+				...item,
+				sortOrder: item.sortOrder ?? 0,
+				createdAt: item.createdAt ?? item.updatedAt
+			}));
 			if (suggestRes.ok) suggestions = await suggestRes.json();
 			if (favsRes.ok) favorites = await favsRes.json();
 			// Cache als plain objects (vor State-Zuweisung)
@@ -156,7 +174,12 @@
 			if (items.length === 0) {
 				listName = await getOfflineListName(targetListId);
 				if (requestVersion !== itemsLoadVersion || targetListId !== (listId ?? '')) return;
-				items = (await getOfflineItems(targetListId)).map(item => ({ ...item, createdByUsername: null }));
+				items = (await getOfflineItems(targetListId)).map(item => ({
+					...item,
+					sortOrder: item.sortOrder ?? 0,
+					createdAt: item.createdAt ?? item.updatedAt,
+					createdByUsername: null
+				}));
 			}
 		}
 		if (requestVersion !== itemsLoadVersion || targetListId !== (listId ?? '')) return;
@@ -268,6 +291,93 @@
 		addModalOpen = true;
 	}
 
+	function orderOpenItems(nextOpenItems: Item[]) {
+		const nextOrder = new Map(nextOpenItems.map((item, index) => [item.id, (index + 1) * 1000]));
+		const ts = Math.floor(Date.now() / 1000);
+		items = items.map(item =>
+			nextOrder.has(item.id)
+				? { ...item, sortOrder: nextOrder.get(item.id)!, updatedAt: ts }
+				: item
+		);
+		void cacheItemsData(items);
+	}
+
+	async function persistOpenItemOrder(nextOpenItems: Item[]) {
+		const itemIds = nextOpenItems.map(item => item.id);
+		await execute(
+			() =>
+				fetch(`/api/lists/${listId}/items/reorder`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ itemIds })
+				}).then(r => {
+					if (!r.ok) throw new Error();
+				}),
+			{ type: 'reorder_items', payload: { listId: listId ?? '', itemIds }, createdAt: Date.now() },
+			() => orderOpenItems(nextOpenItems)
+		);
+	}
+
+	function reorderedOpenItems(item: Item, dir: -1 | 1): Item[] | null {
+		const next = [...openItems];
+		const index = next.findIndex(i => i.id === item.id);
+		const target = index + dir;
+		if (index < 0 || target < 0 || target >= next.length) return null;
+		[next[index], next[target]] = [next[target], next[index]];
+		return next;
+	}
+
+	function moveOpenItem(item: Item, dir: -1 | 1) {
+		if (userPermission === 'read') return;
+		const next = reorderedOpenItems(item, dir);
+		if (!next) return;
+		void persistOpenItemOrder(next);
+	}
+
+	function startReorderDrag(e: PointerEvent, item: Item) {
+		if (userPermission === 'read') return;
+		e.preventDefault();
+		e.stopPropagation();
+		(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+		reorderDragId = item.id;
+		let lastY = e.clientY;
+		let moved = false;
+
+		const onMove = (ev: PointerEvent) => {
+			const delta = ev.clientY - lastY;
+			if (Math.abs(delta) < 34) return;
+			const next = reorderedOpenItems(item, delta < 0 ? -1 : 1);
+			if (next) {
+				orderOpenItems(next);
+				moved = true;
+			}
+			lastY = ev.clientY;
+		};
+		const onEnd = () => {
+			if (moved) void persistOpenItemOrder(openItems);
+			reorderDragId = null;
+			document.removeEventListener('pointermove', onMove);
+			document.removeEventListener('pointerup', onEnd);
+			document.removeEventListener('pointercancel', onEnd);
+		};
+		document.addEventListener('pointermove', onMove);
+		document.addEventListener('pointerup', onEnd);
+		document.addEventListener('pointercancel', onEnd);
+	}
+
+	function sortOrderForNewItem(afterItemId?: string | null): number {
+		const ordered = openItems;
+		if (!ordered.some(item => (item.sortOrder ?? 0) > 0)) return 0;
+		if (!afterItemId) return ((ordered.at(-1)?.sortOrder ?? 0) || ordered.length * 1000) + 1000;
+		const index = ordered.findIndex(item => item.id === afterItemId);
+		const prev = index >= 0 ? ordered[index] : ordered.at(-1);
+		const next = index >= 0 ? ordered[index + 1] : null;
+		const prevOrder = prev?.sortOrder ?? 0;
+		const nextOrder = next?.sortOrder ?? 0;
+		if (prevOrder > 0 && nextOrder > prevOrder + 1) return Math.floor((prevOrder + nextOrder) / 2);
+		return (prevOrder || ordered.length * 1000) + 1000;
+	}
+
 	async function addItem(
 		name: string,
 		quantityInfo: string,
@@ -277,6 +387,7 @@
 		const trimmedName = name.trim();
 		const trimmedQty = quantityInfo.trim() || null;
 		const catOverride = opts?.categoryOverride ?? null;
+		const sortOrder = sortOrderForNewItem(opts?.afterItemId);
 		const optimisticItem: Item = {
 			id,
 			listId: listId ?? '',
@@ -285,7 +396,9 @@
 			isChecked: false,
 			checkedAt: null,
 			categoryOverride: catOverride,
+			sortOrder,
 			createdByUsername: data.user?.username ?? null,
+			createdAt: Math.floor(Date.now() / 1000),
 			updatedAt: Math.floor(Date.now() / 1000)
 		};
 		let nextItems: Item[];
@@ -307,7 +420,8 @@
 						id,
 						name: trimmedName,
 						quantityInfo,
-						categoryOverride: catOverride
+						categoryOverride: catOverride,
+						sortOrder
 					})
 				}).then(r => {
 					if (!r.ok) throw new Error();
@@ -319,7 +433,8 @@
 					listId: listId ?? '',
 					name: trimmedName,
 					quantityInfo,
-					categoryOverride: catOverride
+					categoryOverride: catOverride,
+					sortOrder
 				},
 				createdAt: Date.now()
 			},
@@ -486,6 +601,14 @@
 
 	// SSE — Echtzeit-Updates via globalem SSE-Kanal (Verbindung liegt im Root-Layout)
 	let sseConnectedSinceMount = false;
+	function normalizeItem(item: Item): Item {
+		return {
+			...item,
+			sortOrder: item.sortOrder ?? 0,
+			createdAt: item.createdAt ?? item.updatedAt
+		};
+	}
+
 	const offHandlers = [
 		on('sse_connected', () => {
 			// Beim Reconnect Items neu laden (bei erstem Connect schon via onMount geschehen)
@@ -494,15 +617,27 @@
 		}),
 		on('item_added', (ev) => {
 			if (ev.listId !== listId) return;
-			if (!items.some(i => i.id === (ev.item as Item).id)) {
-				items = [...items, ev.item as Item];
+			const item = normalizeItem(ev.item as Item);
+			if (!items.some(i => i.id === item.id)) {
+				items = [...items, item];
 				void cacheItemsData(items);
 			}
 		}),
 		on('item_updated', (ev) => {
 			if (ev.listId !== listId) return;
-			items = items.map(i => i.id === (ev.item as Item).id ? { ...i, ...(ev.item as Item) } : i);
-			void updateOfflineItem((ev.item as Item).id, ev.item as Partial<Item>);
+			const patch = ev.item as Partial<Item> & { id: string };
+			items = items.map(i =>
+				i.id === patch.id
+					? { ...i, ...patch, sortOrder: patch.sortOrder ?? i.sortOrder ?? 0, createdAt: i.createdAt ?? patch.updatedAt ?? i.updatedAt }
+					: i
+			);
+			void updateOfflineItem(patch.id, patch);
+		}),
+		on('items_reordered', (ev) => {
+			if (ev.listId !== listId || !Array.isArray(ev.itemIds)) return;
+			const ordered = new Map((ev.itemIds as string[]).map((id, index) => [id, (index + 1) * 1000]));
+			items = items.map(item => ordered.has(item.id) ? { ...item, sortOrder: ordered.get(item.id)! } : item);
+			void cacheItemsData(items);
 		}),
 		on('item_deleted', (ev) => {
 			if (ev.listId !== listId) return;
@@ -648,16 +783,17 @@
 					<!-- Listen-Ansicht: vertikale Zeilen, von unten nach oben -->
 					<div class="flex flex-col gap-1 mt-2">
 						{#each displayItems as item (item.id)}
-							<div class="rounded-2xl overflow-hidden">
+							<div class="rounded-2xl overflow-hidden transition-opacity" style={reorderDragId === item.id ? 'opacity: 0.45' : ''}>
 								<ItemRow
 									{item}
 									interactionMode={effectiveListInteractionMode}
 									onTap={() => toggleItemFromView(item)}
-									onToggleCheck={() => toggleItemFromView(item)}
 									onCommitName={(name) => void saveItemInlineName(item, name)}
 									onVerticalNavigate={(d) => void navigateItemVertical(item, d)}
 									onEnterNewBelow={(nextName) => void inlineEnterNewBelow(item, nextName)}
 									onExitEmpty={() => void handleInlineExitEmpty(item)}
+									onReorderMove={(d) => moveOpenItem(item, d)}
+									onReorderGrab={(e) => startReorderDrag(e, item)}
 									onLongPress={() => openItemEdit(item)}
 									createdByUsername={item.createdByUsername}
 									currentUsername={data.user?.username ?? null}
@@ -668,29 +804,32 @@
 					</div>
 				{:else}
 				<!-- Kachel-Ansicht: 3er-Grid -->
-				<div class="grid grid-cols-3 gap-2 mt-3" style={userSettings.categorySortEnabled ? 'direction: rtl' : ''}>
-					{#if userSettings.categorySortEnabled}
+				<div class="grid grid-cols-3 gap-2 mt-3" style={userSettings.categorySortEnabled && !manualOrderActive ? 'direction: rtl' : ''}>
+					{#if userSettings.categorySortEnabled && !manualOrderActive}
 						{#each { length: gridPrefix } as _}
 							<div class="aspect-square"></div>
 						{/each}
 					{/if}
 					{#each displayItems as item (item.id)}
-						<ItemTile
-							{item}
-							interactionMode={effectiveListInteractionMode}
-							onTap={() => toggleItemFromView(item)}
-							onToggleCheck={() => toggleItemFromView(item)}
-							onCommitName={(name) => void saveItemInlineName(item, name)}
-							onVerticalNavigate={(d) => void navigateItemVertical(item, d)}
-							onEnterNewBelow={(nextName) => void inlineEnterNewBelow(item, nextName)}
-							onExitEmpty={() => void handleInlineExitEmpty(item)}
-							onLongPress={() => openItemEdit(item)}
-							createdByUsername={item.createdByUsername}
-							currentUsername={data.user?.username ?? null}
-							isFavorite={favoriteNames.has(item.name.toLowerCase())}
-						/>
+						<div class="transition-opacity" style={reorderDragId === item.id ? 'opacity: 0.45' : ''}>
+							<ItemTile
+								{item}
+								interactionMode={effectiveListInteractionMode}
+								onTap={() => toggleItemFromView(item)}
+								onCommitName={(name) => void saveItemInlineName(item, name)}
+								onVerticalNavigate={(d) => void navigateItemVertical(item, d)}
+								onEnterNewBelow={(nextName) => void inlineEnterNewBelow(item, nextName)}
+								onExitEmpty={() => void handleInlineExitEmpty(item)}
+								onReorderMove={(d) => moveOpenItem(item, d)}
+								onReorderGrab={(e) => startReorderDrag(e, item)}
+								onLongPress={() => openItemEdit(item)}
+								createdByUsername={item.createdByUsername}
+								currentUsername={data.user?.username ?? null}
+								isFavorite={favoriteNames.has(item.name.toLowerCase())}
+							/>
+						</div>
 					{/each}
-					{#if !userSettings.categorySortEnabled}
+					{#if !userSettings.categorySortEnabled || manualOrderActive}
 						{#each { length: gridPrefix } as _}
 							<div class="aspect-square"></div>
 						{/each}
