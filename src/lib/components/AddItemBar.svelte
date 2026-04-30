@@ -199,7 +199,13 @@
 </script>
 
 <!-- Backdrop -->
-<div class="fixed inset-0" style="z-index: 50; background-color: rgba(0,0,0,0.5)"></div>
+<button
+	type="button"
+	class="fixed inset-0"
+	style="z-index: 50; background-color: rgba(0,0,0,0.5)"
+	aria-label={t.close}
+	onclick={onClose}
+></button>
 
 <!-- Bottom sheet -->
 <div class="fixed left-0 right-0 z-[60] max-w-[430px] mx-auto" style="bottom: {bottomOffset}px">
