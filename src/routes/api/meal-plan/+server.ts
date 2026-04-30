@@ -178,6 +178,13 @@ export const POST: RequestHandler = async (event) => {
 		let added = 0;
 
 		for (const item of itemsToAdd) {
+			const duplicate = db
+				.select({ id: items.id })
+				.from(items)
+				.where(and(eq(items.listId, listId), sql`lower(${items.name}) = lower(${item.name})`))
+				.get();
+			if (duplicate) continue;
+
 			const id = generateId(16);
 			db.insert(items).values({
 				id,

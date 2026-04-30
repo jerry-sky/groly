@@ -18,6 +18,10 @@ function getListAccess(listId: string, userId: string): { list: typeof lists.$in
 	return { list: null as any, permission: null };
 }
 
+function canonicalItemName(name: string): string {
+	return name.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 export const GET: RequestHandler = async (event) => {
 	const { error, user } = authGuard(event);
 	if (error) return error;
@@ -58,13 +62,37 @@ export const POST: RequestHandler = async (event) => {
 
 	const body = await event.request.json();
 	const { name, quantityInfo, id: clientId, categoryOverride: bodyCat } = body;
-	const trimmedName = typeof name === 'string' ? name.trim() : '';
+	const trimmedName = typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : '';
 	const rawCat =
 		typeof bodyCat === 'string' && bodyCat.length > 0 && CATEGORIES.some((c) => c.key === bodyCat)
 			? bodyCat
 			: null;
 	const trimmedQty = typeof quantityInfo === 'string' && quantityInfo.trim() ? quantityInfo.trim() : null;
 	const sortOrder = Number.isInteger(body.sortOrder) && body.sortOrder >= 0 ? body.sortOrder : 0;
+
+	if (trimmedName.length > 0) {
+		const existing = db
+			.select({
+				id: items.id,
+				listId: items.listId,
+				name: items.name,
+				quantityInfo: items.quantityInfo,
+				isChecked: items.isChecked,
+				checkedAt: items.checkedAt,
+				categoryOverride: items.categoryOverride,
+				sortOrder: items.sortOrder,
+				createdBy: items.createdBy,
+				createdByUsername: users.username,
+				createdAt: items.createdAt,
+				updatedAt: items.updatedAt
+			})
+			.from(items)
+			.leftJoin(users, eq(items.createdBy, users.id))
+			.where(eq(items.listId, event.params.id))
+			.all()
+			.find(item => canonicalItemName(item.name) === canonicalItemName(trimmedName));
+		if (existing) return json({ duplicate: true, item: existing });
+	}
 
 	const id = typeof clientId === 'string' && clientId.length > 0 && clientId.length <= 32
 		? clientId

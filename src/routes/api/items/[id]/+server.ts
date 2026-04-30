@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import { authGuard } from '$lib/auth/middleware';
 import { db } from '$lib/db';
 import { lists, items, listMembers } from '$lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, ne } from 'drizzle-orm';
 import { emitToListMembers } from '$lib/server/userEvents';
 
 import { now } from '$lib/auth';
@@ -17,6 +17,10 @@ async function getWritableItem(itemId: string, userId: string) {
 	const member = db.select().from(listMembers).where(and(eq(listMembers.listId, list.id), eq(listMembers.userId, userId))).get();
 	if (member?.permission === 'write' && member?.status === 'accepted') return item;
 	return null;
+}
+
+function canonicalItemName(name: string): string {
+	return name.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 export const PUT: RequestHandler = async (event) => {
@@ -36,7 +40,19 @@ export const PUT: RequestHandler = async (event) => {
 	const ts = now();
 	const updates: Record<string, unknown> = { updatedAt: ts };
 
-	if (body.name !== undefined) updates.name = body.name.trim();
+	if (body.name !== undefined) {
+		const nextName = body.name.trim().replace(/\s+/g, ' ');
+		if (nextName.length > 0) {
+			const duplicate = db
+				.select()
+				.from(items)
+				.where(and(eq(items.listId, item.listId), ne(items.id, item.id)))
+				.all()
+				.find(candidate => canonicalItemName(candidate.name) === canonicalItemName(nextName));
+			if (duplicate) return json({ error: 'Doppelt', duplicate: true, item: duplicate }, { status: 409 });
+		}
+		updates.name = nextName;
+	}
 	if (body.quantityInfo !== undefined) updates.quantityInfo = body.quantityInfo?.trim() ?? null;
 	if (body.isChecked !== undefined) {
 		updates.isChecked = body.isChecked;

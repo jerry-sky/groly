@@ -34,7 +34,7 @@
 	let items = $state<Item[]>([]);
 	let favorites = $state<Favorite[]>([]);
 	const favoriteNames = $derived(new Set(favorites.map(f => f.name.toLowerCase())));
-	const activeItemNames = $derived(new Set(items.filter(i => !i.isChecked).map(i => i.name.toLowerCase())));
+	const activeItemNames = $derived(new Set(items.map(i => i.name.toLowerCase())));
 	let menuOpen = $state(false);
 	let addModalOpen = $state(false);
 	let loading = $state(true);
@@ -50,6 +50,8 @@
 	let itemsLoadVersion = 0;
 	let listInteractionMode = $state<ListInteractionMode>('normal');
 	let reorderDragId = $state<string | null>(null);
+	let flashingItemId = $state<string | null>(null);
+	let flashTimer: ReturnType<typeof setTimeout> | null = null;
 
 	const listId = $derived($page.params.id);
 	const showListModeBar = $derived(userPermission !== 'read');
@@ -120,6 +122,36 @@
 
 	function focusInlineEditorById(itemId: string) {
 		document.querySelector<HTMLElement>(`[data-item-editor="${CSS.escape(itemId)}"]`)?.focus();
+	}
+
+	function canonicalItemName(name: string): string {
+		return name.trim().replace(/\s+/g, ' ').toLowerCase();
+	}
+
+	function findDuplicateItem(name: string, exceptId: string | null = null): Item | null {
+		const key = canonicalItemName(name);
+		if (!key) return null;
+		return items.find(item => item.id !== exceptId && canonicalItemName(item.name) === key) ?? null;
+	}
+
+	async function flashExistingItem(item: Item, { focusEditor = false }: { focusEditor?: boolean } = {}) {
+		closeSearch();
+		flashingItemId = null;
+		await tick();
+		document.querySelector<HTMLElement>(`[data-list-item-id="${CSS.escape(item.id)}"]`)?.scrollIntoView({
+			block: 'center',
+			behavior: 'smooth'
+		});
+		if (focusEditor) {
+			await tick();
+			focusInlineEditorById(item.id);
+		}
+		flashingItemId = item.id;
+		if (flashTimer) clearTimeout(flashTimer);
+		flashTimer = setTimeout(() => {
+			flashingItemId = null;
+			flashTimer = null;
+		}, 2500);
 	}
 
 	async function loadItems() {
@@ -198,10 +230,15 @@
 		localStorage.setItem(LIST_INTERACTION_MODE_KEY, m);
 	}
 
-	async function saveItemInlineName(item: Item, newName: string) {
-		if (userPermission === 'read') return;
+	async function saveItemInlineName(item: Item, newName: string): Promise<'saved' | 'duplicate' | 'unchanged'> {
+		if (userPermission === 'read') return 'unchanged';
 		const trimmed = newName.trim();
-		if (!trimmed || trimmed === item.name) return;
+		if (!trimmed || trimmed === item.name) return 'unchanged';
+		const duplicate = findDuplicateItem(trimmed, item.id);
+		if (duplicate) {
+			await flashExistingItem(duplicate, { focusEditor: true });
+			return 'duplicate';
+		}
 		const id = item.id;
 		const clientUpdatedAt = item.updatedAt;
 		await execute(
@@ -220,6 +257,7 @@
 				void updateOfflineItem(id, { name: trimmed, updatedAt: ts });
 			}
 		);
+		return 'saved';
 	}
 
 	async function navigateItemVertical(fromItem: Item, dir: -1 | 1) {
@@ -267,7 +305,11 @@
 			return;
 		}
 		if (trimmed !== fromItem.name) {
-			await saveItemInlineName(fromItem, trimmed);
+			const result = await saveItemInlineName(fromItem, trimmed);
+			if (result === 'duplicate') {
+				if (!fromItem.name.trim()) await handleInlineExitEmpty(fromItem);
+				return;
+			}
 		}
 		const basis = items.find(i => i.id === fromItem.id) ?? fromItem;
 		const cat = categoryOverrideForNewRowAfter(basis);
@@ -387,6 +429,11 @@
 		const trimmedName = name.trim();
 		const trimmedQty = quantityInfo.trim() || null;
 		const catOverride = opts?.categoryOverride ?? null;
+		const duplicate = findDuplicateItem(trimmedName);
+		if (duplicate) {
+			await flashExistingItem(duplicate);
+			return duplicate.id;
+		}
 		const sortOrder = sortOrderForNewItem(opts?.afterItemId);
 		const optimisticItem: Item = {
 			id,
@@ -423,8 +470,15 @@
 						categoryOverride: catOverride,
 						sortOrder
 					})
-				}).then(r => {
+				}).then(async r => {
 					if (!r.ok) throw new Error();
+					const created = await r.json();
+					if (created?.duplicate && created.item) {
+						const duplicateItem = normalizeItem(created.item as Item);
+						items = items.filter(item => item.id !== id);
+						void cacheItemsData(items);
+						await flashExistingItem(duplicateItem);
+					}
 				}),
 			{
 				type: 'create_item',
@@ -452,6 +506,13 @@
 	async function saveEditItem(name: string, quantityInfo: string, categoryOverride: string | null) {
 		if (!editItem) return;
 		const id = editItem.id;
+		const duplicate = findDuplicateItem(name, id);
+		if (duplicate) {
+			addModalOpen = false;
+			editItem = null;
+			await flashExistingItem(duplicate);
+			return;
+		}
 		const clientUpdatedAt = editItem.updatedAt;
 		editItem = null;
 		addModalOpen = false;
@@ -783,7 +844,12 @@
 					<!-- Listen-Ansicht: vertikale Zeilen, von unten nach oben -->
 					<div class="flex flex-col gap-1 mt-2">
 						{#each displayItems as item (item.id)}
-							<div class="rounded-2xl overflow-hidden transition-opacity" style={reorderDragId === item.id ? 'opacity: 0.45' : ''}>
+							<div
+								data-list-item-id={item.id}
+								class="rounded-2xl overflow-hidden transition-opacity"
+								class:duplicate-flash={flashingItemId === item.id}
+								style={reorderDragId === item.id ? 'opacity: 0.45' : ''}
+							>
 								<ItemRow
 									{item}
 									interactionMode={effectiveListInteractionMode}
@@ -811,7 +877,12 @@
 						{/each}
 					{/if}
 					{#each displayItems as item (item.id)}
-						<div class="transition-opacity" style={reorderDragId === item.id ? 'opacity: 0.45' : ''}>
+						<div
+							data-list-item-id={item.id}
+							class="transition-opacity"
+							class:duplicate-flash={flashingItemId === item.id}
+							style={reorderDragId === item.id ? 'opacity: 0.45' : ''}
+						>
 							<ItemTile
 								{item}
 								interactionMode={effectiveListInteractionMode}
@@ -877,3 +948,14 @@
 		onToggleFavorite={toggleFavorite}
 	/>
 {/if}
+
+<style>
+	:global(.duplicate-flash) {
+		animation: duplicate-flash 500ms ease-in-out 2;
+	}
+
+	@keyframes duplicate-flash {
+		0%, 100% { box-shadow: none; }
+		35% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 85%, transparent); }
+	}
+</style>
