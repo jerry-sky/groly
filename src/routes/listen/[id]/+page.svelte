@@ -134,8 +134,9 @@
 		return items.find(item => item.id !== exceptId && canonicalItemName(item.name) === key) ?? null;
 	}
 
-	function openItemsWithRestoredDuplicate(anchor: Item, duplicate: Item): Item[] {
+	function openItemsWithRestoredDuplicate(anchor: Item | null, duplicate: Item): Item[] {
 		const next = openItems.filter(item => item.id !== duplicate.id);
+		if (!anchor) return [...next, { ...duplicate, isChecked: false, checkedAt: null }];
 		const anchorIndex = next.findIndex(item => item.id === anchor.id);
 		const restored = { ...duplicate, isChecked: false, checkedAt: null };
 		if (anchorIndex < 0) return [...next, restored];
@@ -165,13 +166,13 @@
 		}, 2500);
 	}
 
-	async function restoreCheckedDuplicateAt(anchor: Item, duplicate: Item) {
+	async function restoreCheckedDuplicateAt(anchor: Item | null, duplicate: Item, { focusEditor = true }: { focusEditor?: boolean } = {}) {
 		const nextOpenItems = openItemsWithRestoredDuplicate(anchor, duplicate);
 		const nextOrder = new Map(nextOpenItems.map((item, index) => [item.id, (index + 1) * 1000]));
-		const duplicateSortOrder = nextOrder.get(duplicate.id) ?? sortOrderForNewItem(anchor.id);
+		const duplicateSortOrder = nextOrder.get(duplicate.id) ?? sortOrderForNewItem(anchor?.id);
 		const clientUpdatedAt = duplicate.updatedAt;
 		const ts = Math.floor(Date.now() / 1000);
-		const removeAnchor = !anchor.name.trim();
+		const removeAnchor = !!anchor && !anchor.name.trim();
 
 		await execute(
 			() =>
@@ -210,7 +211,7 @@
 		if (removeAnchor) await deleteItem(anchor.id);
 		await persistOpenItemOrder(nextOpenItems);
 		await tick();
-		await flashExistingItem({ ...duplicate, isChecked: false, checkedAt: null, sortOrder: duplicateSortOrder }, { focusEditor: true });
+		await flashExistingItem({ ...duplicate, isChecked: false, checkedAt: null, sortOrder: duplicateSortOrder }, { focusEditor });
 	}
 
 	async function loadItems() {
@@ -518,6 +519,10 @@
 		const catOverride = opts?.categoryOverride ?? null;
 		const duplicate = findDuplicateItem(trimmedName);
 		if (duplicate) {
+			if (duplicate.isChecked) {
+				await restoreCheckedDuplicateAt(null, duplicate, { focusEditor: false });
+				return duplicate.id;
+			}
 			await flashExistingItem(duplicate);
 			return duplicate.id;
 		}
@@ -564,6 +569,10 @@
 						const duplicateItem = normalizeItem(created.item as Item);
 						items = items.filter(item => item.id !== id);
 						void cacheItemsData(items);
+						if (duplicateItem.isChecked) {
+							await restoreCheckedDuplicateAt(null, duplicateItem, { focusEditor: false });
+							return;
+						}
 						await flashExistingItem(duplicateItem);
 					}
 				}),
